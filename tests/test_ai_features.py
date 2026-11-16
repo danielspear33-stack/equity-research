@@ -108,6 +108,9 @@ def test_backtest_uses_only_what_was_known_and_measures_the_following_year():
     assert first["price"] == entry_price
     assert first["stock_return"] == pytest.approx(365 / entry_price)   # the price rises 1 a day
     assert first["market_return"] == 0 and first["excess_return"] == first["stock_return"]
+    # Other measures are taken at the same moment: profit of 150 on 100 shares at that price.
+    assert first["earnings_yield"] == pytest.approx(150 / (entry_price * 100))
+    assert first["momentum"] == pytest.approx(entry_price / (entry_price - 365) - 1)
 
 
 def test_backtest_summary_ranks_within_each_year():
@@ -122,8 +125,21 @@ def test_backtest_summary_ranks_within_each_year():
     assert summary["by_group"]["observations"].tolist() == [4, 4, 4, 4, 4]
     assert summary["spread"] == pytest.approx(0.085 - 0.005)
     assert summary["rank_correlation"] == pytest.approx(1.0)
-    assert summary["years_cheap_won"] == 2
-    assert backtest.verdict(summary).startswith("Some signal")
+    assert summary["years_high_won"] == 2
+    assert backtest.grade(summary) == "Worked"
+    assert backtest.verdict(summary).startswith("This one held up")
+
+
+def test_backtest_grades_a_signal_that_points_the_wrong_way():
+    rows = []
+    for year in (2020, 2021, 2022):
+        for i in range(10):
+            rows.append({"ticker": f"T{i}", "entry_year": year, "fcf_yield": i / 100,
+                         "stock_return": 0.2 - i / 50, "market_return": 0.1,
+                         "excess_return": 0.1 - i / 50})
+    summary = backtest.summarise(pd.DataFrame(rows), "fcf_yield")
+    assert summary["spread"] < 0 and summary["years_high_won"] == 0
+    assert backtest.grade(summary) == "Backwards"
 
 
 # ---- Background jobs and saved details ----
@@ -159,3 +175,9 @@ def test_memo_details_and_settings_round_trip(tmp_path, monkeypatch):
     assert store.get_memo("AAPL") == "A memo."
     assert store.get_memo_details("AAPL")["basis"] == "2026-10-30"
     assert store.get_setting("auto_ai", True) is False
+
+
+def test_billions_are_matched_against_a_source_stated_in_millions():
+    release = "Total cash and investments 20,165 (amounts in millions)"
+    assert factcheck.check("It holds $20.2 billion of cash.", release)["unverified"] == []
+    assert len(factcheck.check("It holds $21.9 billion of cash.", release)["unverified"]) == 1

@@ -28,10 +28,18 @@ bank-specific valuation where a DCF doesn't apply, and a plain-English health ch
 - **What changed in the filings.** The last two annual reports are compared paragraph
   by paragraph; Claude reads only the paragraphs that differ and says which risks
   were added or dropped and how management's description of the business moved.
-- **A backtest of its own signal.** The DCF is re-run on what was known in each past
-  year to see whether shares it called cheap went on to beat the ones it called
-  expensive. On its mechanical defaults, across about 100 large companies from 2019
-  to 2025, they did not, and the page says so.
+- **The latest results, read for the outlook.** Claude reads the company's newest
+  results press release for what management said about the period ahead, the one
+  forward-looking source that is free.
+- **A backtest of its own measures.** Seven of the tool's measures are re-run on what
+  was known in each past year, to see whether companies scoring high went on to beat
+  those scoring low. Across about 100 large companies from 2019 to 2025, sales growth
+  and price momentum held up; the DCF gap and the other value measures pointed the
+  wrong way, and the page says so.
+- **Pictures first.** Each company opens with a five-point scorecard shape, a bar
+  showing the price against each estimate of value, and the health check as a row of
+  dots. Tables sit one click below.
+- **A screener.** About 110 large companies and your watchlist, scored side by side.
 - **Checked by hand.** The calculations are covered by tests that compare them with
   numbers worked out by hand on small made-up companies.
 
@@ -44,9 +52,11 @@ bank-specific valuation where a DCF doesn't apply, and a plain-English health ch
 
 ## The tabs
 
-- **Overview**: today's valuation, results for the latest twelve months, a health
-  check (rule-of-thumb questions answered from the numbers), how the share price has
-  behaved against the S&P 500, and ten years of financial statements.
+- **Overview**: the share price with its 50- and 200-day averages and where it sits
+  in its 52-week range, today's valuation multiples against the company's own
+  history, ten-year trends, and returns against the S&P 500. Valuation multiples,
+  latest results, the health check in full and the financial statements are under
+  "Show the numbers".
 - **Quarterly**: the last eight quarters, growth against a year earlier, and the
   latest twelve months against the last annual report.
 - **DCF**: a discounted cash flow model with editable assumptions, a WACC build-up,
@@ -58,24 +68,30 @@ bank-specific valuation where a DCF doesn't apply, and a plain-English health ch
 - **Valuation summary**: every method on one "football field" chart against the price.
 - **Payouts & insiders**: dividends, buybacks, the share count, pay in shares, and
   what directors and executives have been buying and selling.
-- **Filing changes**: what is new, removed or reworded in the latest annual report
-  compared with the one before, with an AI summary and every changed paragraph listed.
-- **AI memo**: Claude reads the numbers and the annual report and writes a one-page
-  briefing. It explains and questions; it does not make a buy or sell call. It starts
-  writing in the background as soon as you open a company, and a fact-check line shows
-  how many of its figures match the data. It runs on your Claude subscription, with
-  no per-use charge.
-- **Watchlist**: follow companies and get a snapshot of each one every weekday.
-- **Backtest** (in the sidebar): how the model's cheap and expensive calls would have
-  done in past years, with its limitations spelled out.
+- **AI analysis**, in three parts, each starting in the background when you open a
+  company and each opening with a three-line short version:
+  - *Research memo*: Claude reads the numbers and the annual report and writes a
+    one-page briefing. It explains and questions; it does not make a buy or sell call.
+  - *Latest results announcement*: what management said when it last reported.
+  - *What changed in the annual report*: what is new, removed or reworded against
+    the year before, with every changed paragraph listed.
 
-Every company page opens with an at-a-glance strip: price, market value, the DCF
-value, what peers imply, the growth the price implies and the health-check score,
-with one sentence putting them together.
+  A fact-check line on the memo and the results digest shows how many figures match
+  the source. All of it runs on your Claude subscription, with no per-use charge.
+- **Watchlist**: follow companies and get a snapshot of each one every weekday.
+- **Screener** (in the sidebar): about 110 large companies and your watchlist ranked
+  on five scores; click a row to open the company.
+- **Backtest** (in the sidebar): which of the tool's measures would have pointed the
+  right way in past years, with the test's limitations spelled out.
+
+Every company page opens with an at-a-glance panel: a scorecard shape (Value, Growth,
+Profitability, Health and Payouts, each out of five on a fixed scale set out in
+`research/scorecard.py`), the headline numbers, a bar placing today's price against
+the DCF and peer values, and the health check as coloured dots.
 
 The tabs are in two colour-coded groups. Blue tabs (Overview, Quarterly, Payouts &
 insiders) are market data of the kind any finance site shows. Gold tabs (DCF or
-Bank valuation, Comps, Valuation summary, AI memo) are this tool's own analysis.
+Bank valuation, Comps, Valuation summary, AI analysis) are this tool's own analysis.
 The colours and the rest of the look are set in `.streamlit/config.toml` and
 `views/style.py`.
 
@@ -132,7 +148,8 @@ other's work, and the memo routes that would spend the owner's Claude usage are 
 
 `python -m research.refresh` re-runs every company on your watchlist and adds one
 row per company to `userdata/snapshots.csv`. It also updates the list of US-listed
-companies in `data/companies.json`.
+companies in `data/companies.json`. and re-scores the screener's companies
+into `userdata/screener.csv`.
 
 `.github/workflows/daily-refresh.yml` runs that command on GitHub every weekday at
 22:30 UTC (after the US market closes) and commits the new snapshot. To turn it on:
@@ -164,9 +181,13 @@ watchlist marks filings from the last week as new.
 | `research/comps.py` | Peer suggestions, peer multiples and implied values |
 | `research/filings.py` | Downloads the annual report and extracts the key sections |
 | `research/memo.py` | Builds the prompt and calls Claude for the memo |
+| `research/scorecard.py` | The five scores out of five, and the scale behind each |
+| `research/valhistory.py` | Valuation multiples month by month, to compare today with the company's own past |
+| `research/earnings.py` | Finds the latest results press release and has Claude read it |
+| `research/screener.py` | Scores the built-in companies and the watchlist side by side |
 | `research/factcheck.py` | Checks each figure in an AI memo against the data the AI was given |
 | `research/changes.py` | Compares the last two annual reports and has Claude summarise the differences |
-| `research/backtest.py` | Re-runs the DCF on past data and measures what happened next |
+| `research/backtest.py` | Re-runs seven of the tool's measures on past data and measures what happened next |
 | `research/background.py` | Runs the slow AI jobs without freezing the screen |
 | `research/store.py` | Saves your watchlist, assumptions, peers, snapshots and memos in `userdata/` |
 | `research/refresh.py` | The daily refresh |
@@ -211,6 +232,14 @@ These are judgement calls, set in `research/config.py`:
   rewritten shows as one removed and one new.
 - **The backtest covers a short, unusual period and only today's large companies.** Its
   page lists what that means for the result.
+- **The scores are rules of thumb.** Each runs in a straight line between fixed levels
+  (for example, sales growth of 20% or more scores 5 for Growth). They are for skimming
+  and for narrowing a list, not verdicts, and the backtest shows that a high Value
+  score in particular has not been a reliable guide.
+- **Valuation against history uses annual results**, taken as known 90 days after each
+  fiscal year ended, so a multiple can jump when a new year's results arrive.
+- **The results digest reads the press release only**, not the earnings call, and a
+  company's own release shows it in the best light.
 
 - **US-listed companies only.** Any of the roughly 10,000 tickers on the SEC's list
   can be searched by ticker or name (`data/companies.json`, updated by the daily

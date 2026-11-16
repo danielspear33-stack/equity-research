@@ -26,23 +26,23 @@ from datetime import date
 import pandas as pd
 
 from . import config, dcf, edgar, metrics, statements
-from .cache import fetch_json
+from .prices import get_long_price_history as long_prices
 
-LONG_CHART_URL = "https://query1.finance.yahoo.com/v8/finance/chart/{ticker}?range=15y&interval=1d"
 PUBLICATION_LAG_DAYS = 90
 HOLDING_DAYS = 365
-GROUPS = ["Most expensive", "Expensive", "Middle", "Cheap", "Cheapest"]
+GROUPS = ["Lowest fifth", "Second", "Middle", "Fourth", "Highest fifth"]
 
-
-def long_prices(ticker: str) -> pd.Series:
-    """Fifteen years of daily closing prices."""
-    ticker = ticker.strip().upper().replace(".", "-")
-    name = "prices_long_" + ticker.replace("^", "index_")
-    raw = fetch_json(LONG_CHART_URL.format(ticker=ticker.replace("^", "%5E")), name,
-                     config.FILINGS_MAX_AGE)
-    result = raw["chart"]["result"][0]
-    dates = pd.to_datetime(result["timestamp"], unit="s").normalize()
-    return pd.Series(result["indicators"]["quote"][0]["close"], index=dates).dropna()
+# The measures tested. Each is something this tool shows for a company; the
+# question is whether a high reading was followed by a better year.
+SIGNALS = {
+    "dcf_gap": "DCF value against price",
+    "fcf_yield": "Free cash flow yield",
+    "earnings_yield": "Earnings yield (profit / market value)",
+    "return_on_capital": "Return on invested capital",
+    "operating_margin": "Operating margin",
+    "revenue_growth": "Sales growth",
+    "momentum": "Share price change over the year before",
+}
 
 
 def universe() -> list:
@@ -90,12 +90,25 @@ def observations(ticker: str, annual: pd.DataFrame, prices: pd.Series, market: p
         value = result["value_per_share"]
         if pd.isna(value):
             continue
+        market_cap = price * latest["diluted_shares"]
+        year_metrics = known_metrics.iloc[-1]
+        year_before = _price_on(prices, entry - pd.Timedelta(days=365))
+
+        def per_market_cap(amount):
+            return amount / market_cap if pd.notna(amount) and market_cap > 0 else None
+
         stock_return = later_price / price - 1
         market_return = index_later / index_then - 1
         rows.append({
             "ticker": ticker, "fiscal_year_end": year_end.date().isoformat(),
             "entry_date": entry.date().isoformat(), "entry_year": entry.year,
             "price": price, "dcf_value": value, "dcf_gap": value / price - 1,
+            "fcf_yield": per_market_cap(year_metrics["free_cash_flow"]),
+            "earnings_yield": per_market_cap(latest["net_income"]),
+            "return_on_capital": year_metrics["return_on_invested_capital"],
+            "operating_margin": year_metrics["operating_margin"],
+            "revenue_growth": year_metrics["revenue_growth"],
+            "momentum": price / year_before - 1 if year_before else None,
             "stock_return": stock_return, "market_return": market_return,
             "excess_return": stock_return - market_return,
         })
@@ -126,49 +139,50 @@ def run(tickers: list = None, progress=None) -> tuple:
     return pd.DataFrame(rows), skipped
 
 
-def add_groups(table: pd.DataFrame) -> pd.DataFrame:
-    """Rank each year's companies by DCF gap and split them into five equal groups."""
-    table = table.copy()
-    rank = table.groupby("entry_year")["dcf_gap"].rank(pct=True)
+def add_groups(table: pd.DataFrame, signal: str = "dcf_gap") -> pd.DataFrame:
+    """Rank each year's companies by `signal` and split them into five equal groups."""
+    table = table.dropna(subset=[signal]).copy()
+    rank = table.groupby("entry_year")[signal].rank(pct=True)
     table["group"] = pd.cut(rank, [0, 0.2, 0.4, 0.6, 0.8, 1.0], labels=GROUPS, include_lowest=True)
     return table
 
 
-def summarise(table: pd.DataFrame) -> dict:
-    """The headline numbers: results by group, by year, and how strong the link is."""
-    table = add_groups(table)
+def summarise(table: pd.DataFrame, signal: str = "dcf_gap") -> dict:
+    """The headline numbers for one signal: results by group, by year, and how strong the link is."""
+    table = add_groups(table, signal)
     by_group = table.groupby("group", observed=True).agg(
         observations=("excess_return", "size"),
-        typical_dcf_gap=("dcf_gap", "median"),
+        typical_reading=(signal, "median"),
         average_return=("stock_return", "mean"),
         average_excess_return=("excess_return", "mean"),
         beat_the_market=("excess_return", lambda x: (x > 0).mean()),
     ).reindex(GROUPS)
 
-    cheap = table[table["group"].isin(GROUPS[3:])]
-    expensive = table[table["group"].isin(GROUPS[:2])]
+    high = table[table["group"].isin(GROUPS[3:])]
+    low = table[table["group"].isin(GROUPS[:2])]
     by_year = pd.DataFrame({
         "companies": table.groupby("entry_year").size(),
-        "cheap_half_excess": cheap.groupby("entry_year")["excess_return"].mean(),
-        "expensive_half_excess": expensive.groupby("entry_year")["excess_return"].mean(),
+        "high_excess": high.groupby("entry_year")["excess_return"].mean(),
+        "low_excess": low.groupby("entry_year")["excess_return"].mean(),
     })
-    by_year["cheap_minus_expensive"] = by_year["cheap_half_excess"] - by_year["expensive_half_excess"]
+    by_year["high_minus_low"] = by_year["high_excess"] - by_year["low_excess"]
 
-    # Rank correlation within each year, averaged: +1 would mean the model
+    # Rank correlation within each year, averaged: +1 would mean the signal
     # ordered the companies perfectly, 0 that it told you nothing.
     yearly = table.groupby("entry_year").apply(
-        lambda year: year["dcf_gap"].rank().corr(year["excess_return"].rank()),
+        lambda year: year[signal].rank().corr(year["excess_return"].rank()),
         include_groups=False,
     ).dropna()
-    spread = (by_group.loc["Cheapest", "average_excess_return"]
-              - by_group.loc["Most expensive", "average_excess_return"])
+    spread = (by_group.loc[GROUPS[-1], "average_excess_return"]
+              - by_group.loc[GROUPS[0], "average_excess_return"])
     return {
+        "signal": signal,
         "by_group": by_group,
         "by_year": by_year,
         "spread": float(spread),
         "rank_correlation": float(yearly.mean()) if not yearly.empty else float("nan"),
-        "years_cheap_won": int((by_year["cheap_minus_expensive"] > 0).sum()),
-        "years": int(by_year["cheap_minus_expensive"].notna().sum()),
+        "years_high_won": int((by_year["high_minus_low"] > 0).sum()),
+        "years": int(by_year["high_minus_low"].notna().sum()),
         "observations": len(table),
         "companies": table["ticker"].nunique(),
         "first_year": int(table["entry_year"].min()),
@@ -176,24 +190,50 @@ def summarise(table: pd.DataFrame) -> dict:
     }
 
 
-def verdict(summary: dict) -> str:
-    """One honest sentence on what the test found."""
-    spread, correlation = summary["spread"], summary["rank_correlation"]
-    won, years = summary["years_cheap_won"], summary["years"]
-    detail = (f"the cheapest fifth {'beat' if spread > 0 else 'lagged'} the most expensive fifth "
-              f"by {abs(spread):.1%} a year on average, and the cheaper half came out ahead in "
-              f"{won} of {years} years")
+def compare_signals(table: pd.DataFrame) -> pd.DataFrame:
+    """One row per signal: how the highest fifth did against the lowest, best first."""
+    rows = []
+    for signal, name in SIGNALS.items():
+        if signal not in table.columns or table[signal].notna().sum() < 50:
+            continue
+        summary = summarise(table, signal)
+        rows.append({"signal": signal, "name": name, "spread": summary["spread"],
+                     "years_high_won": summary["years_high_won"], "years": summary["years"],
+                     "rank_correlation": summary["rank_correlation"],
+                     "verdict": grade(summary)})
+    return pd.DataFrame(rows).sort_values("spread", ascending=False).reset_index(drop=True)
+
+
+def grade(summary: dict) -> str:
+    """ "Worked", "Backwards" or "No signal", from the size and consistency of the gap."""
+    spread, won, years = summary["spread"], summary["years_high_won"], summary["years"]
     if abs(spread) < 0.03:
-        return (f"No useful signal: {detail}. On its mechanical default assumptions the DCF gap "
-                "did not separate winners from losers.")
-    if spread > 0 and correlation > 0 and won * 2 > years:
-        return (f"Some signal: {detail}. Treat this as suggestive, not proven; see the "
-                "limitations below.")
-    if spread < 0:
-        return (f"The signal pointed the wrong way: {detail}. Shares the default DCF called "
-                "expensive tended to do better, which is what happens when a model built on "
-                "past averages meets companies that keep growing faster than their history.")
-    return f"Mixed: {detail}. Not consistent enough to rely on."
+        return "No signal"
+    if spread > 0:
+        return "Worked" if won * 2 > years else "Inconsistent"
+    return "Backwards" if won * 2 < years else "Inconsistent"
+
+
+def verdict(summary: dict) -> str:
+    """One honest sentence on what the test found for a signal."""
+    name = SIGNALS[summary["signal"]]
+    name = name if name.startswith("DCF") else name[0].lower() + name[1:]
+    spread, won, years = summary["spread"], summary["years_high_won"], summary["years"]
+    detail = (f"companies in the highest fifth for {name} {'beat' if spread > 0 else 'lagged'} "
+              f"those in the lowest fifth by {abs(spread):.1%} a year on average, and the higher "
+              f"half came out ahead in {won} of {years} years")
+    outcome = grade(summary)
+    if outcome == "No signal":
+        return f"No useful signal: {detail}."
+    if outcome == "Worked":
+        return (f"This one held up: {detail}. Suggestive, not proven; see the limitations below.")
+    if outcome == "Backwards":
+        if summary["signal"] == "dcf_gap":
+            return (f"The signal pointed the wrong way: {detail}. Shares the default DCF called "
+                    "cheap did worse, which is what happens when a model built on past averages "
+                    "meets companies that keep growing faster than their history.")
+        return f"The signal pointed the wrong way: {detail}."
+    return f"Inconsistent: {detail}. Not steady enough to rely on."
 
 
 def results_file():

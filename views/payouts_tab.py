@@ -1,10 +1,12 @@
 """Payouts and insiders tab: cash returned to shareholders, dilution, and insider trades."""
 
+import altair as alt
 import pandas as pd
 import streamlit as st
 
 from research import insiders, payouts
 
+from . import style
 from .formatting import by_year, dollars, money, percent
 
 
@@ -16,6 +18,52 @@ def _shares(value) -> str:
     if value is None or pd.isna(value):
         return "–"
     return f"{value / 1e9:,.2f}B" if value >= 1e9 else f"{value / 1e6:,.0f}M"
+
+
+def _payout_chart(table: pd.DataFrame) -> None:
+    """Dividends and buybacks stacked by year, with the share count as a line."""
+    years = [f"FY{d.year}" for d in table.index]
+    paid = pd.DataFrame({"year": years,
+                         "Dividends": (table["dividends_paid"] / 1e9).values,
+                         "Buybacks": (table["buybacks"] / 1e9).values})
+    bars_data = paid.melt("year", var_name="kind", value_name="billions").dropna()
+    if bars_data.empty or bars_data["billions"].abs().sum() == 0:
+        return
+    bars = alt.Chart(bars_data).mark_bar().encode(
+        x=alt.X("year:N", sort=years, title=None, axis=alt.Axis(labelAngle=0)),
+        y=alt.Y("billions:Q", title="Returned to shareholders ($B)", stack="zero"),
+        color=alt.Color("kind:N", title=None, legend=alt.Legend(orient="top"),
+                        scale=alt.Scale(domain=["Dividends", "Buybacks"], range=[style.BLUE, style.GOLD])),
+        tooltip=[alt.Tooltip("year:N", title="Year"), alt.Tooltip("kind:N", title="Paid as"),
+                 alt.Tooltip("billions:Q", title="$ billions", format=",.2f")],
+    )
+    shares = pd.DataFrame({"year": years, "shares": (table["diluted_shares"] / 1e9).values}).dropna()
+    line = alt.Chart(shares).mark_line(color=style.GREY, point=alt.OverlayMarkDef(color=style.GREY)).encode(
+        x=alt.X("year:N", sort=years),
+        y=alt.Y("shares:Q", title="Share count (billions)", scale=alt.Scale(zero=False)),
+        tooltip=[alt.Tooltip("year:N", title="Year"),
+                 alt.Tooltip("shares:Q", title="Shares (billions)", format=",.2f")],
+    )
+    st.altair_chart(alt.layer(bars, line).resolve_scale(y="independent").properties(height=300),
+                    width="stretch")
+    st.caption("Bars: cash paid out each year. Grey line: the number of shares. Buybacks that "
+               "work show up as a falling line.")
+
+
+def _insider_chart(chosen: pd.DataFrame) -> None:
+    """Open-market buying (up, green) and selling (down, red) by month."""
+    monthly = chosen.assign(month=chosen["date"].dt.to_period("M").dt.to_timestamp())
+    monthly = monthly.groupby(["month", "side"], as_index=False)["value"].sum()
+    monthly["millions"] = monthly["value"].where(monthly["side"] == "Buy", -monthly["value"]) / 1e6
+    chart = alt.Chart(monthly).mark_bar().encode(
+        x=alt.X("yearmonth(month):O", title=None, axis=alt.Axis(labelAngle=0)),
+        y=alt.Y("millions:Q", title="Bought (up) and sold (down), $M"),
+        color=alt.Color("side:N", title=None, legend=alt.Legend(orient="top"),
+                        scale=alt.Scale(domain=["Buy", "Sell"], range=[style.GREEN, style.RED])),
+        tooltip=[alt.Tooltip("yearmonth(month):O", title="Month"), alt.Tooltip("side:N", title="Trade"),
+                 alt.Tooltip("millions:Q", title="$ millions", format=",.1f")],
+    ).properties(height=240)
+    st.altair_chart(chart, width="stretch")
 
 
 def _payouts(data: dict) -> None:
@@ -35,7 +83,9 @@ def _payouts(data: dict) -> None:
         st.caption("No dividends or buybacks are reported in the filings for this period.")
 
     table = payouts.by_year(s, m)
-    st.dataframe(
+    _payout_chart(table)
+    numbers = st.expander("Show the numbers: payouts year by year")
+    numbers.dataframe(
         pd.concat([
             by_year(table, {"dividends_paid": "Dividends paid", "buybacks": "Buybacks",
                             "total_returned": "Total returned"}, money),
@@ -46,8 +96,8 @@ def _payouts(data: dict) -> None:
         ]),
         width="stretch",
     )
-    st.caption("Returning more than 100% of profit or free cash flow means paying from "
-               "savings or borrowing, which can't continue indefinitely.")
+    numbers.caption("Returning more than 100% of profit or free cash flow means paying from "
+                    "savings or borrowing, which can't continue indefinitely.")
 
     st.subheader("Share count and pay in shares")
     cols = st.columns(3)
@@ -61,7 +111,7 @@ def _payouts(data: dict) -> None:
         years = len(shares) - 1
         cols[2].metric(f"Share count change, {years} years", _signed(shares.iloc[-1] / shares.iloc[0] - 1),
                        help="Negative is good for shareholders: each share is a bigger slice.")
-    st.dataframe(
+    st.expander("Show the numbers: share count and stock pay year by year").dataframe(
         pd.concat([
             by_year(table, {"diluted_shares": "Diluted shares"}, _shares),
             by_year(table, {"share_count_change": "Change on the year before"}, _signed),
@@ -108,6 +158,7 @@ def _insiders(data: dict, load_insiders) -> dict:
         st.info("None of these filings is an open-market purchase or sale. They are routine: "
                 "share awards, vesting and tax withholding.")
     else:
+        _insider_chart(chosen)
         # One filing often lists a sale in several lots; show one line per person per day.
         chosen = chosen.assign(day=chosen["date"].dt.date)
         grouped = chosen.groupby(["day", "insider", "role", "side", "planned", "page"], sort=False).agg(

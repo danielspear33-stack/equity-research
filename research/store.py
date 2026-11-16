@@ -158,6 +158,16 @@ def save_filing_changes(ticker: str, comparison: dict) -> None:
     _write_text(f"changes/{ticker}.json", json.dumps(comparison, indent=1) + "\n")
 
 
+# ---- Latest results announcement, read by AI ----
+
+def get_earnings_digest(ticker: str) -> dict:
+    return _read(f"earnings/{ticker}.json", {})
+
+
+def save_earnings_digest(ticker: str, digest: dict) -> None:
+    _write_text(f"earnings/{ticker}.json", json.dumps(digest, indent=1) + "\n")
+
+
 # ---- Settings ----
 
 def get_setting(name: str, default):

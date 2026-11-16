@@ -52,9 +52,9 @@ def _readings(number: str, unit: str) -> list:
     if unit == "%":
         scales = [1, 0.01]                # 33.0% may be stored as 33.0 or 0.33
     elif unit in ("t", "trillion"):
-        scales = [1000, 1e12, 1]          # tables are in billions
+        scales = [1000, 1e12, 1, 1e6]     # this tool's tables are in billions; filings often in millions
     elif unit in ("b", "bn", "billion"):
-        scales = [1, 1e9]
+        scales = [1, 1e9, 1000]           # "$20.2 billion" may be 20,165 in a table of millions
     elif unit in ("m", "million"):
         scales = [1, 0.001, 1e6]
     else:

@@ -1,11 +1,13 @@
-"""Overview tab: valuation today, latest results, health check, price, charts and statements."""
+"""Overview tab: the pictures first (price, valuation against its own history, ten-year
+trends), with every table of numbers one click below."""
 
+import altair as alt
 import pandas as pd
 import streamlit as st
 
-from research import checks, payouts, prices, pricestats
+from research import checks, payouts, prices, pricestats, valhistory
 
-from . import style
+from . import style, visuals
 from .formatting import by_year, dollars, money, multiple, percent, signed_percent
 
 STATUS_LABELS = {checks.GOOD: "Good", checks.WATCH: "Watch", checks.WEAK: "Weak",
@@ -67,7 +69,6 @@ def _latest_results(data: dict) -> None:
 
 
 def _health_check(data: dict) -> None:
-    st.subheader("Health check")
     results = checks.run(data)
     counts = pd.Series([r["status"] for r in results]).value_counts()
     st.caption(
@@ -109,26 +110,30 @@ def _price(data: dict) -> None:
         st.caption("No price data.")
         return
     stats = pricestats.summary(history)
-    cols = st.columns(6)
-    cols[0].metric("52-week high", dollars(stats["high_52_week"]), signed_percent(stats["below_high"]),
-                   help="The change shown is today's price against the high.")
-    cols[1].metric("52-week low", dollars(stats["low_52_week"]), signed_percent(stats["above_low"]),
-                   help="The change shown is today's price against the low.")
-    cols[2].metric("50-day average", dollars(stats["average_50_day"]))
-    cols[3].metric("200-day average", dollars(stats["average_200_day"]),
-                   signed_percent(stats["vs_200_day"]),
-                   help="The average price over about ten months. Price above it means the "
-                        "trend has been up.")
-    cols[4].metric("Yearly volatility", percent(stats["volatility"]),
-                   help="How much the price typically swings in a year. The S&P 500 is usually 15-20%.")
-    cols[5].metric("Worst fall, 5 years", percent(stats["worst_fall"]),
-                   help="The largest drop from a peak to a later low. A guide to how bad a bad "
-                        "patch has been.")
+    price = float(history.iloc[-1])
 
     left, right = st.columns([3, 2])
     with left:
-        st.line_chart(history)
+        lines = pd.DataFrame({
+            "Price": history,
+            "50-day average": history.rolling(50).mean(),
+            "200-day average": history.rolling(200).mean(),
+        }).rename_axis("date").reset_index().melt("date", var_name="line", value_name="value").dropna()
+        chart = alt.Chart(lines).mark_line().encode(
+            x=alt.X("date:T", title=None),
+            y=alt.Y("value:Q", title=None, scale=alt.Scale(zero=False), axis=alt.Axis(format="$,.0f")),
+            color=alt.Color("line:N", title=None, legend=alt.Legend(orient="top"),
+                            scale=alt.Scale(domain=["Price", "50-day average", "200-day average"],
+                                            range=[style.BLUE, style.GOLD, style.GREY])),
+            strokeWidth=alt.condition("datum.line == 'Price'", alt.value(2), alt.value(1.2)),
+            tooltip=[alt.Tooltip("date:T", title="Date"), alt.Tooltip("line:N", title="Line"),
+                     alt.Tooltip("value:Q", title="Value", format="$,.2f")],
+        ).properties(height=300)
+        st.altair_chart(chart, width="stretch")
     with right:
+        st.caption("Where today's price sits in its 52-week range")
+        visuals.range_bar(stats["low_52_week"], stats["high_52_week"], price,
+                          f"Low {dollars(stats['low_52_week'])}", f"High {dollars(stats['high_52_week'])}")
         try:
             market = prices.get_price_history("^GSPC")
         except Exception:  # noqa: BLE001 - the comparison is a nice-to-have
@@ -140,6 +145,80 @@ def _price(data: dict) -> None:
             shown["Difference"] = table["difference"].map(signed_percent_1)
         st.dataframe(shown, width="stretch")
         st.caption(f"Price change to {stats['as_of']:%d %b %Y}, not counting dividends.")
+
+    with st.expander("Show the numbers: averages, volatility and worst fall"):
+        cols = st.columns(6)
+        cols[0].metric("52-week high", dollars(stats["high_52_week"]), signed_percent(stats["below_high"]),
+                       help="The change shown is today's price against the high.")
+        cols[1].metric("52-week low", dollars(stats["low_52_week"]), signed_percent(stats["above_low"]),
+                       help="The change shown is today's price against the low.")
+        cols[2].metric("50-day average", dollars(stats["average_50_day"]))
+        cols[3].metric("200-day average", dollars(stats["average_200_day"]),
+                       signed_percent(stats["vs_200_day"]),
+                       help="The average price over about ten months. Price above it means the "
+                            "trend has been up.")
+        cols[4].metric("Yearly volatility", percent(stats["volatility"]),
+                       help="How much the price typically swings in a year. The S&P 500 is usually 15-20%.")
+        cols[5].metric("Worst fall, 5 years", percent(stats["worst_fall"]),
+                       help="The largest drop from a peak to a later low. A guide to how bad a bad "
+                            "patch has been.")
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def _multiples_history(ticker: str, statements: pd.DataFrame, metrics: pd.DataFrame) -> pd.DataFrame:
+    return valhistory.history(statements, metrics, prices.get_long_price_history(ticker))
+
+
+def _own_history(data: dict) -> None:
+    """Is the share cheap or dear compared with its own past?"""
+    v = data["valuation"]
+    if v is None:
+        return
+    st.subheader("Cheap or dear against its own history")
+    try:
+        history = _multiples_history(data["ticker"], data["statements"], data["metrics"])
+    except Exception as error:  # noqa: BLE001 - needs a second, longer price download
+        st.caption(f"The longer price history couldn't be loaded. ({error})")
+        return
+    financial = data["profile"]["is_financial"]
+    today = {"pe": v["price_to_earnings"], "ev_ebitda": v["ev_to_ebitda"],
+             "pb": v["price_to_book"]}
+    choices = ["pe", "pb"] if financial else ["pe", "ev_ebitda"]
+    drawn = 0
+    for column, name in zip(st.columns(len(choices)), choices):
+        if history.empty or name not in history:
+            continue
+        where = valhistory.position(history[name], today[name])
+        if where is None:
+            continue
+        drawn += 1
+        label = valhistory.MULTIPLES[name]
+        series = history[name].dropna()
+        # The newest month uses today's figure, which is built from the latest results.
+        series.iloc[-1] = where["current"]
+        points = series.rename("value").rename_axis("date").reset_index()
+        base = alt.Chart(points).encode(x=alt.X("date:T", title=None))
+        band = alt.Chart(pd.DataFrame([where])).mark_rect(color=style.GOLD, opacity=0.13).encode(
+            y="low:Q", y2="high:Q")
+        middle = alt.Chart(pd.DataFrame([where])).mark_rule(color=style.GOLD, strokeDash=[5, 4]).encode(
+            y="median:Q")
+        line = base.mark_line(color=style.BLUE).encode(
+            y=alt.Y("value:Q", title=None, scale=alt.Scale(zero=False), axis=alt.Axis(format=".0f")),
+            tooltip=[alt.Tooltip("date:T", title="Month"), alt.Tooltip("value:Q", title=label, format=".1f")])
+        dot = alt.Chart(points.tail(1)).mark_point(color=style.BLUE, size=110, filled=True).encode(
+            x="date:T", y="value:Q")
+        with column:
+            gap = where["current"] / where["median"] - 1
+            st.metric(f"{label} today", multiple(where["current"]),
+                      f"{gap:+.0%} against its usual {where['median']:.1f}x", delta_color="inverse")
+            st.altair_chart((band + middle + line + dot).properties(height=220), width="stretch")
+            st.caption(valhistory.describe(label, where))
+    if not drawn:
+        st.caption("Not enough history with positive profits to compare today's multiples with the past.")
+    else:
+        st.caption("The line is the multiple at each month-end, using the results published by "
+                   "then. The dashed line is its typical level and the shaded band covers the "
+                   "middle 80% of months. Above the band is dear by its own standards; below is cheap.")
 
 
 def signed_percent_1(value) -> str:
@@ -167,11 +246,9 @@ def _announcements(data: dict) -> None:
 def render(data: dict) -> None:
     s, m = data["statements"], data["metrics"]
 
-    _valuation(data)
-    _latest_results(data)
-    _health_check(data)
-    _trends(data)
     _price(data)
+    _own_history(data)
+    _trends(data)
 
     st.subheader("Revenue and free cash flow by fiscal year ($B)")
     chart = pd.DataFrame(
@@ -181,7 +258,12 @@ def render(data: dict) -> None:
     st.bar_chart(chart, y=["Revenue", "Free cash flow"], color=[style.BLUE, style.GREEN], stack=False)
 
     # The full tables are one click away, so they don't crowd the page.
-    st.subheader("The detail")
+    st.subheader("Show the numbers")
+    with st.expander("Valuation multiples and the latest results", expanded=True):
+        _valuation(data)
+        _latest_results(data)
+    with st.expander("Health check, question by question"):
+        _health_check(data)
     with st.expander("Margins and returns, year by year"):
         st.dataframe(
             by_year(

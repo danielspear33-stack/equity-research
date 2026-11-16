@@ -6,7 +6,7 @@ GitHub Actions runs it automatically every weekday (see .github/workflows).
 
 import sys
 
-from . import config, edgar, report, store
+from . import config, edgar, report, screener, store
 
 
 def snapshot_for(ticker: str) -> dict:
@@ -63,6 +63,14 @@ def main() -> int:
         print(f"Company list updated: {edgar.update_company_list():,} tickers.")
     except Exception as error:  # noqa: BLE001 - the saved list still works
         print(f"Company list not updated: {error}")
+
+    # Re-score the screener's companies, so the table is current each morning.
+    try:
+        table, skipped = screener.build()
+        screener.save(table)
+        print(f"Screener updated: {len(table)} companies, {len(skipped)} left out.")
+    except Exception as error:  # noqa: BLE001 - yesterday's table still works
+        print(f"Screener not updated: {error}")
 
     watchlist = store.get_watchlist()
     if not watchlist:

@@ -46,7 +46,7 @@ CSS = f"""
 .er-legend {{ display: flex; gap: 22px; color: {MUTED}; font-size: 0.82rem; margin: 2px 0 6px; }}
 .er-dot {{ display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 7px; }}
 
-.er-grid {{ display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }}
+.er-grid {{ display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(128px, 1fr)); }}
 .er-card {{
     background: {CARD}; border: 1px solid {BORDER}; border-radius: 12px; padding: 14px 16px;
     border-top: 3px solid {BLUE};
