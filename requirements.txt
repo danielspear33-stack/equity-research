@@ -1,3 +1,4 @@
+# Libraries the app needs. launch.py installs these on first run.
 streamlit>=1.67
 pandas>=2.2
 requests>=2.31
