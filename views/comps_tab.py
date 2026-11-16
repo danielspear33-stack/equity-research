@@ -10,6 +10,30 @@ from . import style
 from .formatting import dollars, money, multiple, percent
 
 
+# What the chart can compare: label, scale for the axis, axis number format,
+# and how to write the figure in a sentence.
+COMPARED = {
+    "ev_to_ebitda": ("EV / EBITDA", 1, ".1f", multiple),
+    "ev_to_sales": ("EV / Sales", 1, ".1f", multiple),
+    "price_to_earnings": ("P/E", 1, ".1f", multiple),
+    "revenue_growth": ("Revenue growth", 1, "+.0%", percent),
+    "operating_margin": ("Operating margin", 1, ".0%", percent),
+    "return_on_invested_capital": ("Return on invested capital", 1, ".0%", percent),
+    "market_cap": ("Market value ($B)", 1e-9, ",.0f", money),
+}
+# For banks and insurers the enterprise-value multiples and margins don't apply.
+FINANCIAL_CHOICES = ["price_to_earnings", "revenue_growth", "market_cap"]
+COMPARED_NOTES = {
+    "ev_to_ebitda": "A company trading above the line is priced more richly than its peers.",
+    "ev_to_sales": "A company trading above the line is priced more richly than its peers.",
+    "price_to_earnings": "A company trading above the line is priced more richly than its peers.",
+    "revenue_growth": "Faster growth is the usual reason for a higher multiple.",
+    "operating_margin": "Higher margins are the other usual reason for a higher multiple.",
+    "return_on_invested_capital": "How much profit each dollar put into the business earns.",
+    "market_cap": "Size matters when choosing peers: very different sizes are weaker comparisons.",
+}
+
+
 def render(data: dict, load_comps):
     """Draw the tab. Returns the comps result, or None if there are no peers."""
     ticker = data["ticker"]
@@ -69,7 +93,6 @@ def render(data: dict, load_comps):
     table = pd.concat([own, result["peers"]])
     financial = data["profile"]["is_financial"]
     column = "price_to_earnings" if financial else "ev_to_ebitda"
-    label = comps.MULTIPLES[column]
     summary, implied = result["summary"], result["implied"]
 
     # 1. What the peers imply, as headline cards.
@@ -92,25 +115,35 @@ def render(data: dict, load_comps):
         st.caption("Each range runs from the peers' 25th to 75th percentile multiple.")
 
     # 2. The comparison as a chart: this company in gold, peers in blue.
-    bars = table[[column]].dropna().reset_index(names="company")
-    if not bars.empty:
+    #    A selector switches the chart between everything worth comparing.
+    choices = {name: COMPARED[name] for name in
+               (FINANCIAL_CHOICES if financial else COMPARED) if table[name].notna().any()}
+    if choices:
+        chosen = st.segmented_control(
+            "Compare on", list(choices), default=column if column in choices else next(iter(choices)),
+            format_func=lambda name: choices[name][0], key=f"{ticker}_compare_on",
+        ) or column
+        label, scale, axis_format, show = choices[chosen]
+        bars = (table[chosen].dropna() * scale).rename("value").rename_axis("company").reset_index()
         st.subheader(f"{label}: {ticker} against its peers")
         bars["group"] = bars["company"].str.contains("this company").map({True: "This company", False: "Peer"})
         chart = alt.Chart(bars).mark_bar(cornerRadiusEnd=4, height=22).encode(
-            x=alt.X(f"{column}:Q", title=label),
+            x=alt.X("value:Q", title=label, axis=alt.Axis(format=axis_format)),
             y=alt.Y("company:N", sort="-x", title=None, axis=alt.Axis(labelLimit=220)),
             color=alt.Color("group:N", legend=None,
                             scale=alt.Scale(domain=["This company", "Peer"], range=[style.GOLD, style.BLUE])),
-            tooltip=[alt.Tooltip("company:N", title="Company"), alt.Tooltip(f"{column}:Q", format=".1f", title=label)],
+            tooltip=[alt.Tooltip("company:N", title="Company"),
+                     alt.Tooltip("value:Q", format=axis_format, title=label)],
         )
         layers = chart
-        if column in summary.index:
-            median = alt.Chart(pd.DataFrame({"median": [summary.loc[column, "median"]]})).mark_rule(
+        peers_only = result["peers"][chosen].dropna()
+        if len(peers_only) >= 2:
+            median = alt.Chart(pd.DataFrame({"median": [peers_only.median() * scale]})).mark_rule(
                 color="#e8ecf4", strokeDash=[5, 4]).encode(x="median:Q")
             layers = chart + median
         st.altair_chart(layers.properties(height=60 + 34 * len(bars)), width="stretch")
-        if column in summary.index:
-            st.caption(f"The dashed line is the peer median of {multiple(summary.loc[column, 'median'])}.")
+        note = f"The dashed line is the peer median of {show(peers_only.median())}. " if len(peers_only) >= 2 else ""
+        st.caption(note + COMPARED_NOTES.get(chosen, ""))
 
     # 3. The full numbers, one click away.
     shown = pd.DataFrame(
