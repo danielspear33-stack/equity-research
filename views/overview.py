@@ -5,10 +5,11 @@ import streamlit as st
 
 from research import checks, payouts, prices, pricestats
 
+from . import style
 from .formatting import by_year, dollars, money, multiple, percent, signed_percent
 
-STATUS_ICONS = {checks.GOOD: "🟢 Good", checks.WATCH: "🟡 Watch", checks.WEAK: "🔴 Weak",
-                checks.UNKNOWN: "⚪ No data"}
+STATUS_LABELS = {checks.GOOD: "Good", checks.WATCH: "Watch", checks.WEAK: "Weak",
+                 checks.UNKNOWN: "No data"}
 
 
 def _valuation(data: dict) -> None:
@@ -16,8 +17,13 @@ def _valuation(data: dict) -> None:
     financial = data["profile"]["is_financial"]
     st.subheader("Valuation today")
     cols = st.columns(6)
-    cols[0].metric("Share price", dollars(v["price"]) if v else "–")
-    cols[1].metric("Market cap", money(v["market_cap"]) if v else "–")
+    # Share price and market value are in the strip at the top of the page.
+    cols[0].metric("Enterprise value", money(v["enterprise_value"]) if v and not financial else
+                   (money(v["market_cap"]) if v else "–"),
+                   help="What it would cost to buy the whole business: the shares plus its debt, "
+                        "minus its cash." if not financial else "The market value of all the shares.")
+    cols[1].metric("EV / Sales" if not financial else "Share price",
+                   (multiple(v["ev_to_sales"]) if not financial else dollars(v["price"])) if v else "–")
     cols[2].metric("P/E", multiple(v["price_to_earnings"]) if v else "–",
                    help="Share price divided by earnings per share: how many years of today's "
                         "profit you pay for the company.")
@@ -69,14 +75,31 @@ def _health_check(data: dict) -> None:
         f"{counts.get(checks.WEAK, 0)} weak. Rules of thumb about the business, not about "
         "whether the share price is fair."
     )
-    st.dataframe(
-        pd.DataFrame({
-            "Question": [r["question"] for r in results],
-            "Result": [STATUS_ICONS[r["status"]] for r in results],
-            "What the numbers say": [r["detail"] for r in results],
-        }),
-        hide_index=True, width="stretch",
-    )
+    style.health_checks(results, STATUS_LABELS)
+
+
+def _trends(data: dict) -> None:
+    """Ten years at a glance: each card shows the latest figure and its trend line."""
+    s, m = data["statements"], data["metrics"]
+    st.subheader(f"Ten-year trends (fiscal years {s.index[0].year} to {s.index[-1].year})")
+    if data["profile"]["is_financial"]:
+        lines = [("Revenue", s["revenue"], money), ("Net income", s["net_income"], money),
+                 ("Net margin", m["net_margin"], percent),
+                 ("Return on equity", m["return_on_equity"], percent),
+                 ("Shareholders' equity", s["equity"], money)]
+    else:
+        lines = [("Revenue", s["revenue"], money),
+                 ("Operating margin", m["operating_margin"], percent),
+                 ("Free cash flow", m["free_cash_flow"], money),
+                 ("Return on invested capital", m["return_on_invested_capital"], percent),
+                 ("Net debt", m["net_debt"], money)]
+    for column, (label, series, formatter) in zip(st.columns(len(lines)), lines):
+        known = series.dropna()
+        if known.empty:
+            column.metric(label, "–")
+            continue
+        column.metric(label, formatter(known.iloc[-1]), chart_data=known.tolist(), chart_type="line")
+    st.caption("Each card shows the latest fiscal year and the line of every year before it.")
 
 
 def _price(data: dict) -> None:
@@ -123,12 +146,31 @@ def signed_percent_1(value) -> str:
     return "–" if value is None or pd.isna(value) else f"{value:+.1%}"
 
 
+def _announcements(data: dict) -> None:
+    announcements = data.get("announcements") or []
+    if not announcements:
+        st.caption("No announcements found in the company's recent filings.")
+        return
+    results = [a["filed"] for a in announcements if a["is_earnings"]]
+    if results:
+        st.caption("Results were last announced on "
+                   + ", ".join(f"{pd.Timestamp(d):%d %b %Y}" for d in results[:4])
+                   + ". Companies usually report on a similar date each quarter.")
+    st.dataframe(
+        pd.DataFrame(announcements)[["filed", "what", "url"]].rename(
+            columns={"filed": "Date", "what": "What happened", "url": "Document"}),
+        column_config={"Document": st.column_config.LinkColumn(display_text="Open on SEC.gov")},
+        hide_index=True, width="stretch",
+    )
+
+
 def render(data: dict) -> None:
     s, m = data["statements"], data["metrics"]
 
     _valuation(data)
     _latest_results(data)
     _health_check(data)
+    _trends(data)
     _price(data)
 
     st.subheader("Revenue and free cash flow by fiscal year ($B)")
@@ -136,56 +178,58 @@ def render(data: dict) -> None:
         {"Revenue": s["revenue"] / 1e9, "Free cash flow": m["free_cash_flow"] / 1e9}
     )
     chart.index = [f"FY{d.year}" for d in s.index]
-    st.bar_chart(chart, stack=False)
+    st.bar_chart(chart, y=["Revenue", "Free cash flow"], color=[style.BLUE, style.GREEN], stack=False)
 
-    st.subheader("Margins and returns")
-    st.dataframe(
-        by_year(
-            m,
-            {
-                "revenue_growth": "Revenue growth",
-                "gross_margin": "Gross margin",
-                "operating_margin": "Operating margin",
-                "net_margin": "Net margin",
-                "fcf_margin": "Free cash flow margin",
-                "return_on_equity": "Return on equity",
-                "return_on_invested_capital": "Return on invested capital",
-            },
-            percent,
-        ),
-        width="stretch",
-    )
-
-    st.subheader("Financial statements")
-    st.dataframe(
-        by_year(
-            s.join(m[["free_cash_flow", "ebitda", "net_debt"]]),
-            {
-                "revenue": "Revenue",
-                "gross_profit": "Gross profit",
-                "operating_income": "Operating income",
-                "ebitda": "EBITDA",
-                "net_income": "Net income",
-                "cash_from_operations": "Cash from operations",
-                "capex": "Capital expenditure",
-                "free_cash_flow": "Free cash flow",
-                "cash_and_investments": "Cash and short-term investments",
-                "total_debt": "Total debt",
-                "net_debt": "Net debt",
-                "equity": "Shareholders' equity",
-            },
-            money,
-        ),
-        width="stretch",
-    )
-
-    if data["filings"]:
-        st.subheader("Recent filings")
+    # The full tables are one click away, so they don't crowd the page.
+    st.subheader("The detail")
+    with st.expander("Margins and returns, year by year"):
         st.dataframe(
-            pd.DataFrame(data["filings"])[["filed", "form", "url"]].rename(
-                columns={"filed": "Filed", "form": "Form", "url": "Document"}
+            by_year(
+                m,
+                {
+                    "revenue_growth": "Revenue growth",
+                    "gross_margin": "Gross margin",
+                    "operating_margin": "Operating margin",
+                    "net_margin": "Net margin",
+                    "fcf_margin": "Free cash flow margin",
+                    "return_on_equity": "Return on equity",
+                    "return_on_invested_capital": "Return on invested capital",
+                },
+                percent,
             ),
-            column_config={"Document": st.column_config.LinkColumn(display_text="Open on SEC.gov")},
-            hide_index=True,
             width="stretch",
         )
+    with st.expander("Financial statements, year by year"):
+        st.dataframe(
+            by_year(
+                s.join(m[["free_cash_flow", "ebitda", "net_debt"]]),
+                {
+                    "revenue": "Revenue",
+                    "gross_profit": "Gross profit",
+                    "operating_income": "Operating income",
+                    "ebitda": "EBITDA",
+                    "net_income": "Net income",
+                    "cash_from_operations": "Cash from operations",
+                    "capex": "Capital expenditure",
+                    "free_cash_flow": "Free cash flow",
+                    "cash_and_investments": "Cash and short-term investments",
+                    "total_debt": "Total debt",
+                    "net_debt": "Net debt",
+                    "equity": "Shareholders' equity",
+                },
+                money,
+            ),
+            width="stretch",
+        )
+    with st.expander("Results dates and company announcements"):
+        _announcements(data)
+    if data["filings"]:
+        with st.expander("Recent filings"):
+            st.dataframe(
+                pd.DataFrame(data["filings"])[["filed", "form", "url"]].rename(
+                    columns={"filed": "Filed", "form": "Form", "url": "Document"}
+                ),
+                column_config={"Document": st.column_config.LinkColumn(display_text="Open on SEC.gov")},
+                hide_index=True,
+                width="stretch",
+            )

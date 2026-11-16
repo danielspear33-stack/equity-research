@@ -1,0 +1,14 @@
+# The look of the app. Change the colours here to restyle everything at once.
+[theme]
+base = "dark"
+primaryColor = "#5b9dff"
+backgroundColor = "#0d1320"
+secondaryBackgroundColor = "#161e2e"
+textColor = "#e8ecf4"
+borderColor = "#28324a"
+baseRadius = "medium"
+font = "sans-serif"
+chartCategoricalColors = ["#5b9dff", "#f2b84b", "#4ecb9e", "#e2687a", "#a78bfa"]
+
+[browser]
+gatherUsageStats = false

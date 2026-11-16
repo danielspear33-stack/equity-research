@@ -22,6 +22,16 @@ company's own SEC filings and its share price:
   on your Claude subscription, with no per-use charge.
 - **Watchlist**: follow companies and get a snapshot of each one every weekday.
 
+Every company page opens with an at-a-glance strip: price, market value, the DCF
+value, what peers imply, the growth the price implies and the health-check score,
+with one sentence putting them together.
+
+The tabs are in two colour-coded groups. Blue tabs (Overview, Quarterly, Payouts &
+insiders) are market data of the kind any finance site shows. Gold tabs (DCF or
+Bank valuation, Comps, Valuation summary, AI memo) are this tool's own analysis.
+The colours and the rest of the look are set in `.streamlit/config.toml` and
+`views/style.py`.
+
 Built with AI assistance (Claude Code).
 
 ## Run it

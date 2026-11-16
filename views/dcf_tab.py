@@ -5,6 +5,7 @@ import streamlit as st
 
 from research import dcf, report, store
 
+from . import style
 from .formatting import dollars, money, percent, signed_percent
 
 # (field, label, lowest, highest, step, help text) - all shown as percentages.
@@ -48,14 +49,17 @@ def render(data: dict):
     if f"{ticker}_years" not in st.session_state:
         _load_into_widgets(ticker, dcf.Assumptions(**saved) if saved else defaults)
 
-    st.caption(
-        "The starting values are mechanical: averages of the last three years, with growth "
-        "fading to the terminal rate. They are a baseline to argue with, not a forecast. "
-        f"The forecast starts from revenue for the {data['latest']['label']}."
-        + (" You are currently seeing your saved assumptions." if saved else "")
+    style.own_analysis(
+        "A discounted cash flow model: what the company's future cash is worth today. "
+        + ("Using your saved assumptions." if saved else
+           "Starting from mechanical defaults (three-year averages), a baseline to argue with.")
     )
+    # The answer goes first; this space is filled in once it has been worked out.
+    headline = st.container()
 
-    with st.expander("Assumptions", expanded=True):
+    with st.expander("Change the assumptions", expanded=False):
+        st.caption(f"The forecast starts from revenue for the {data['latest']['label']}. "
+                   "Every number here can be changed, and the whole page updates.")
         cols = st.columns(5)
         cols[0].number_input("Forecast years", 3, 15, step=1, key=f"{ticker}_years",
                              help="How many years to forecast before the terminal value.")
@@ -83,27 +87,89 @@ def render(data: dict):
         return None
 
     price = data["valuation"]["price"]
-    cols = st.columns(5)
-    cols[0].metric("DCF value per share", dollars(result["value_per_share"]))
-    cols[1].metric("Share price", dollars(price))
-    cols[2].metric("DCF vs price", signed_percent(result["upside"]))
-    cols[3].metric("Growth the price implies",
-                   percent(result["implied_growth"]) if result["implied_growth"] is not None else "out of range",
-                   help="Reverse DCF: the year-1 growth rate at which this model's value "
-                        "equals today's price, keeping every other assumption as set.")
-    cols[4].metric("Terminal value share", percent(result["terminal_share"]),
-                   help="How much of the value comes from the years after the forecast.")
+    gap = result["upside"]
+    with headline:
+        style.cards([
+            {"label": "DCF value per share", "value": dollars(result["value_per_share"]), "own": True,
+             "note": (f"{abs(gap):.0%} {'above' if gap > 0 else 'below'} the price"
+                      if result["value_per_share"] > 0 else "no value on these assumptions"),
+             "tone": style.tone(gap)},
+            {"label": "Share price today", "value": dollars(price)},
+            {"label": "Growth the price implies", "own": True,
+             "value": percent(result["implied_growth"]) if result["implied_growth"] is not None else "Out of range",
+             "note": "year-1 sales growth at which this model's value equals the price"},
+            {"label": "Discount rate (WACC)", "value": percent(assumptions.wacc),
+             "note": f"terminal growth {percent(assumptions.terminal_growth)}"},
+            {"label": "Value from after the forecast", "value": percent(result["terminal_share"]),
+             "note": "share of value in the terminal value"},
+        ])
+        if result["terminal_share"] is not None and result["terminal_share"] > 0.75:
+            st.warning("More than three-quarters of the value comes from the terminal value, so the "
+                       "answer rests almost entirely on the discount rate and terminal growth.")
+        if assumptions.ebit_margin <= 0:
+            st.warning("With a negative operating margin the company never generates cash in this "
+                       "model, so the value is not meaningful. Set the margin you expect it to reach.")
 
-    if result["terminal_share"] is not None and result["terminal_share"] > 0.75:
-        st.warning("More than three-quarters of the value comes from the terminal value, so the "
-                   "answer rests almost entirely on the discount rate and terminal growth.")
-    if assumptions.ebit_margin <= 0:
-        st.warning("With a negative operating margin the company never generates cash in this "
-                   "model, so the value is not meaningful. Set the margin you expect it to reach.")
+    st.subheader("Bear, base and bull cases")
+    cases = result["scenarios"]
+    style.cards([
+        {"label": f"{name} case: growth {percent(row['growth_start'])}, margin "
+                  f"{percent(row['ebit_margin'])}, discount rate {percent(row['wacc'])}",
+         "value": dollars(row["value_per_share"]), "own": True,
+         "note": f"{abs(row['value_per_share'] / price - 1):.0%} "
+                 f"{'above' if row['value_per_share'] > price else 'below'} the price",
+         "tone": style.tone(row["value_per_share"] / price - 1)}
+        for name, row in cases.iterrows()
+    ])
+    st.caption("Base is the assumptions above. Bear and bull move growth, margin and the "
+               "discount rate together: growth by 2 points (or 30% of itself if larger), margin "
+               "by 15%, and the discount rate by 1 point. A rule of thumb for how far the "
+               "answer moves, not a forecast of either outcome.")
 
-    left, right = st.columns([3, 2])
-    with left:
-        st.subheader("From enterprise value to value per share")
+    st.subheader("Sensitivity: value per share")
+    grid = result["sensitivity"]
+
+    def shade(value):
+        """Green where the value is above today's price, red where below."""
+        if pd.isna(value):
+            return ""
+        distance = value / price - 1
+        strength = min(0.12 + abs(distance) * 0.6, 0.55)
+        colour = "78,203,158" if distance >= 0 else "226,104,122"
+        return f"background-color: rgba({colour},{strength:.2f})"
+
+    table = grid.copy()
+    table.index = [f"Discount rate {w:.1%}" for w in grid.index]
+    table.columns = [f"Growth {g:.1%}" for g in grid.columns]
+    st.dataframe(table.style.map(shade).format(dollars), width="stretch")
+    st.caption("Rows are discount rates, columns are terminal growth rates. Green cells are "
+               f"above today's price of {dollars(price)}, red cells below.")
+
+    st.subheader("Forecast ($B)")
+    forecast = result["forecast"]
+    chart = pd.DataFrame({"Revenue": forecast["revenue"] / 1e9,
+                          "Free cash flow": forecast["free_cash_flow"] / 1e9})
+    chart.index = [f"Year {y:02d}" for y in forecast.index]
+    st.bar_chart(chart, y=["Revenue", "Free cash flow"], color=[style.BLUE, style.GREEN], stack=False)
+
+    st.subheader("The working")
+    with st.expander("Forecast, line by line"):
+        shown = pd.DataFrame(
+            {
+                "Revenue growth": forecast["growth"].map(percent),
+                "Revenue": forecast["revenue"].map(money),
+                "Operating profit": forecast["ebit"].map(money),
+                "After-tax operating profit": forecast["after_tax_profit"].map(money),
+                "Plus D&A": forecast["d_and_a"].map(money),
+                "Less capex": forecast["capex"].map(money),
+                "Less working capital": forecast["working_capital_change"].map(money),
+                "Free cash flow": forecast["free_cash_flow"].map(money),
+                "Present value": forecast["present_value"].map(money),
+            }
+        ).T
+        shown.columns = [f"Year {y}" for y in forecast.index]
+        st.dataframe(shown, width="stretch")
+    with st.expander("From enterprise value to value per share"):
         bridge = pd.DataFrame(
             {
                 "": [
@@ -127,8 +193,7 @@ def render(data: dict):
             }
         )
         st.dataframe(bridge, hide_index=True, width="stretch")
-    with right:
-        st.subheader("Where the default discount rate comes from")
+    with st.expander("Where the default discount rate comes from"):
         parts = pd.DataFrame(
             {
                 "": [
@@ -147,51 +212,5 @@ def render(data: dict):
         st.dataframe(parts, hide_index=True, width="stretch")
         st.caption(f"Risk-free rate: {wacc_parts['risk_free_source']}. "
                    f"Beta: {wacc_parts['beta_source']}. The equity risk premium is an assumption.")
-
-    st.subheader("Bear, base and bull cases")
-    cases = result["scenarios"]
-    st.dataframe(
-        pd.DataFrame(
-            {
-                "Revenue growth, year 1": cases["growth_start"].map(percent),
-                "Operating margin": cases["ebit_margin"].map(percent),
-                "Discount rate": cases["wacc"].map(percent),
-                "Value per share": cases["value_per_share"].map(dollars),
-                "Against today's price": (cases["value_per_share"] / price - 1).map(signed_percent),
-            }
-        ).T,
-        width="stretch",
-    )
-    st.caption("Base is the assumptions above. Bear and bull move growth, margin and the "
-               "discount rate together: growth by 2 points (or 30% of itself if larger), margin "
-               "by 15%, and the discount rate by 1 point. A rule of thumb for how far the "
-               "answer moves, not a forecast of either outcome.")
-
-    st.subheader("Forecast")
-    forecast = result["forecast"]
-    shown = pd.DataFrame(
-        {
-            "Revenue growth": forecast["growth"].map(percent),
-            "Revenue": forecast["revenue"].map(money),
-            "Operating profit": forecast["ebit"].map(money),
-            "After-tax operating profit": forecast["after_tax_profit"].map(money),
-            "Plus D&A": forecast["d_and_a"].map(money),
-            "Less capex": forecast["capex"].map(money),
-            "Less working capital": forecast["working_capital_change"].map(money),
-            "Free cash flow": forecast["free_cash_flow"].map(money),
-            "Present value": forecast["present_value"].map(money),
-        }
-    ).T
-    shown.columns = [f"Year {y}" for y in forecast.index]
-    st.dataframe(shown, width="stretch")
-
-    st.subheader("Sensitivity: value per share")
-    grid = result["sensitivity"]
-    table = grid.map(dollars)
-    table.index = [f"WACC {w:.1%}" for w in grid.index]
-    table.columns = [f"Growth {g:.1%}" for g in grid.columns]
-    st.dataframe(table, width="stretch")
-    st.caption(f"Rows are discount rates, columns are terminal growth rates. "
-               f"The share price today is {dollars(price)}.")
 
     return result, assumptions, wacc_parts, bool(saved)

@@ -6,6 +6,7 @@ import streamlit as st
 
 from research import comps
 
+from . import style
 from .formatting import dollars
 
 
@@ -56,14 +57,15 @@ def render(data: dict, dcf_output, comps_result, bank_output=None) -> None:
         return
     price = data["valuation"]["price"]
 
+    style.own_analysis("Every valuation method on one chart, against today's price.")
     st.caption(
-        "Each bar is the range of value per share one method gives; the tick is its central "
-        "estimate and the vertical line is today's price. Where the methods disagree is "
+        "Each bar is the range of value per share one method gives; the white tick is its central "
+        "estimate and the dashed blue line is today's price. Where the methods disagree is "
         "where the thinking needs to happen."
     )
     order = ranges["method"].tolist()
     base = alt.Chart(ranges).encode(y=alt.Y("method:N", sort=order, title=None, axis=alt.Axis(labelLimit=260)))
-    bars = base.mark_bar(height=22, color="#7aa6d6").encode(
+    bars = base.mark_bar(height=22, color=style.GOLD, opacity=0.55, cornerRadius=4).encode(
         x=alt.X("low:Q", title="Value per share ($)", scale=alt.Scale(zero=False)),
         x2="high:Q",
         tooltip=[alt.Tooltip("method:N", title="Method"),
@@ -71,9 +73,9 @@ def render(data: dict, dcf_output, comps_result, bank_output=None) -> None:
                  alt.Tooltip("mid:Q", format="$,.2f", title="Central"),
                  alt.Tooltip("high:Q", format="$,.2f", title="High")],
     )
-    ticks = base.mark_tick(thickness=3, size=30, color="#1f3a5f").encode(x="mid:Q")
+    ticks = base.mark_tick(thickness=3, size=30, color="#ffffff").encode(x="mid:Q")
     rule = alt.Chart(pd.DataFrame({"price": [price]})).mark_rule(
-        color="#d1495b", strokeWidth=2, strokeDash=[6, 4]
+        color=style.BLUE, strokeWidth=2, strokeDash=[6, 4]
     ).encode(x="price:Q")
     st.altair_chart((bars + ticks + rule).properties(height=60 + 48 * len(ranges)),
                     width="stretch")

@@ -5,6 +5,7 @@ import streamlit as st
 
 from research import financials, market
 
+from . import style
 from .formatting import dollars, multiple, percent, signed_percent
 
 # (field, label, lowest, highest, step, help text) - all shown as percentages.
@@ -35,6 +36,7 @@ def render(data: dict):
     price = v["price"]
     snap = financials.snapshot(latest_s, data["statements"], data["metrics"], price)
 
+    style.own_analysis("A valuation built for banks and insurers, in place of the DCF.")
     st.caption(
         "A standard DCF doesn't work for banks, insurers and brokers: borrowing is their raw "
         "material, so free cash flow means nothing. They are valued on what shareholders own "

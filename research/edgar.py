@@ -88,3 +88,61 @@ def get_recent_filings(cik: int, forms=("10-K", "10-Q", "8-K"), limit: int = 10)
         if len(filings) == limit:
             break
     return filings
+
+
+# An 8-K is the form a company files when something happens that investors
+# should know about. Each one lists numbered "items" saying what kind of news it is.
+ANNOUNCEMENT_TYPES = {
+    "2.02": "Results announced",
+    "1.01": "Major agreement signed",
+    "1.02": "Major agreement ended",
+    "1.03": "Bankruptcy",
+    "1.05": "Cybersecurity incident",
+    "2.01": "Acquisition or sale completed",
+    "2.03": "New debt taken on",
+    "2.05": "Restructuring or job cuts",
+    "2.06": "Asset write-down",
+    "3.01": "Stock exchange listing warning",
+    "4.01": "Auditor changed",
+    "4.02": "Earlier financial statements withdrawn",
+    "5.02": "Director or executive change",
+    "5.03": "Bylaws changed",
+    "5.07": "Shareholder vote results",
+    "7.01": "Investor update",
+    "8.01": "Other news",
+}
+EARNINGS_ITEM = "2.02"
+
+
+def get_announcements(cik: int, limit: int = 15) -> list:
+    """The company's latest announcements (8-K filings), newest first.
+
+    Each has the date, a plain description of what it was, whether it was a
+    results announcement, and a link to the document.
+    """
+    raw = fetch_json(PROFILE_URL.format(cik=cik), f"profile_{cik}", config.FILINGS_MAX_AGE)
+    recent = raw.get("filings", {}).get("recent", {})
+    announcements = []
+    for form, filed, accession, document, items in zip(
+        recent.get("form", []),
+        recent.get("filingDate", []),
+        recent.get("accessionNumber", []),
+        recent.get("primaryDocument", []),
+        recent.get("items", []),
+    ):
+        if form != "8-K":
+            continue
+        codes = [code.strip() for code in (items or "").split(",")]
+        kinds = [ANNOUNCEMENT_TYPES[code] for code in codes if code in ANNOUNCEMENT_TYPES]
+        announcements.append(
+            {
+                "filed": filed,
+                "what": ", ".join(dict.fromkeys(kinds)) or "Other news",
+                "is_earnings": EARNINGS_ITEM in codes,
+                "url": "https://www.sec.gov/Archives/edgar/data/"
+                f"{cik}/{accession.replace('-', '')}/{document}",
+            }
+        )
+        if len(announcements) == limit:
+            break
+    return announcements

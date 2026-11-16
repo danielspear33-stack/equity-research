@@ -4,6 +4,8 @@ import streamlit as st
 
 from research import config, edgar, filings, memo, store
 
+from . import style
+
 
 def _build_context(data, dcf_output, comps_result, include_report: bool, bank_output=None,
                    insider_summary=None) -> str:
@@ -25,6 +27,7 @@ def _build_context(data, dcf_output, comps_result, include_report: bool, bank_ou
 
 def render(data: dict, dcf_output, comps_result, bank_output=None, insider_summary=None) -> None:
     ticker = data["ticker"]
+    style.own_analysis("An AI-written briefing that reads the numbers and the annual report together.")
     st.caption(
         "Gives Claude everything on these tabs, plus the Business, Risk Factors and MD&A sections "
         "of the latest annual report, and asks for a one-page memo. It explains and questions "

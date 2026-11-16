@@ -7,10 +7,11 @@ import streamlit as st
 
 from research import insiders, report, store
 from research.edgar import TickerNotFound
-from views import (bank_tab, comps_tab, dcf_tab, memo_tab, overview, payouts_tab, quarterly_tab,
-                   summary_tab, watchlist)
+from views import (bank_tab, comps_tab, dcf_tab, glance, memo_tab, overview, payouts_tab,
+                   quarterly_tab, style, summary_tab, watchlist)
 
 st.set_page_config(page_title="Equity Research", page_icon="📊", layout="wide")
+style.apply()
 
 
 @st.cache_data(ttl=3600, show_spinner=False)
@@ -107,27 +108,39 @@ if data["price_error"]:
     st.warning(f"Share price unavailable right now, so valuation is blank. ({data['price_error']})")
 
 is_financial = profile["is_financial"]
-tabs = st.tabs(["Overview", "Quarterly", "Bank valuation" if is_financial else "DCF", "Comps",
-                "Valuation summary", "Payouts & insiders", "AI memo"])
-with tabs[0]:
+
+# The handful of numbers that matter most. The space is reserved here and
+# filled in below, once the valuation tabs have produced their results.
+at_a_glance = st.container()
+
+# Market data first, then this tool's own analysis (style.MARKET_DATA_TABS
+# says where the split is, and colours the second group gold).
+style.legend()
+(overview_tab, quarterly, payouts, valuation, peers, summary, ai_memo) = st.tabs(
+    ["Overview", "Quarterly", "Payouts & insiders",
+     "Bank valuation" if is_financial else "DCF", "Comps", "Valuation summary", "AI memo"])
+
+with overview_tab:
     overview.render(data)
-with tabs[1]:
+with quarterly:
     quarterly_tab.render(data)
-with tabs[2]:
+with payouts:
+    insider_summary = payouts_tab.render(data, load_insiders)
+with valuation:
     # Banks and insurers get their own valuation; everyone else gets the DCF.
     dcf_output = None if is_financial else dcf_tab.render(data)
     bank_output = bank_tab.render(data) if is_financial else None
-with tabs[3]:
+with peers:
     comps_result = comps_tab.render(data, load_comps)
-with tabs[4]:
+with summary:
     summary_tab.render(data, dcf_output, comps_result, bank_output)
-with tabs[5]:
-    insider_summary = payouts_tab.render(data, load_insiders)
-with tabs[6]:
+with ai_memo:
     memo_tab.render(data, dcf_output, comps_result, bank_output, insider_summary)
+with at_a_glance:
+    glance.render(data, dcf_output, comps_result, bank_output)
 
 st.caption(
     "Figures are matched automatically from company filings, so some are approximations: "
-    "total debt mostly excludes leases, and market cap uses the average diluted share count "
-    "from the latest quarter or year reported. Nothing here is investment advice."
+    "total debt mostly excludes leases, and market value uses the share count on the cover "
+    "of the newest report where one is given. Nothing here is investment advice."
 )

@@ -186,3 +186,66 @@ def test_health_check_for_a_bank_skips_cash_flow_and_debt():
     assert "Is debt manageable?" not in results
     assert results["Does it earn a good return on shareholders' money?"] == checks.GOOD
     assert results["Is the dividend comfortably covered by profit?"] == checks.GOOD
+
+
+def test_cover_page_share_count_is_used_only_when_plausible():
+    from research import statements
+
+    def facts(*rows):
+        return {"facts": {"dei": {"EntityCommonStockSharesOutstanding": {"units": {"shares": list(rows)}}}}}
+
+    older = {"end": "2024-01-15", "filed": "2024-02-01", "val": 990}
+    newer = {"end": "2024-10-15", "filed": "2024-11-01", "val": 950}
+    assert statements.latest_shares_outstanding(facts(older, newer), reference=1000) == 950
+    # One share class out of several, or a count from before a split: ignore it.
+    assert statements.latest_shares_outstanding(facts({**newer, "val": 300}), reference=1000) is None
+    assert statements.latest_shares_outstanding({"facts": {}}, reference=1000) is None
+
+
+def test_announcements_are_described_and_results_flagged(monkeypatch):
+    from research import edgar
+
+    profile = {"filings": {"recent": {
+        "form": ["8-K", "10-Q", "8-K", "8-K"],
+        "filingDate": ["2026-10-30", "2026-10-29", "2026-09-01", "2026-08-01"],
+        "accessionNumber": ["0001-26-000003", "0001-26-000002", "0001-26-000001", "0001-26-000000"],
+        "primaryDocument": ["a.htm", "b.htm", "c.htm", "d.htm"],
+        "items": ["2.02,9.01", "", "5.02", "9.01"],
+    }}}
+    monkeypatch.setattr(edgar, "fetch_json", lambda *args: profile)
+    found = edgar.get_announcements(123)
+    assert [a["filed"] for a in found] == ["2026-10-30", "2026-09-01", "2026-08-01"]
+    assert found[0]["what"] == "Results announced" and found[0]["is_earnings"]
+    assert found[1]["what"] == "Director or executive change" and not found[1]["is_earnings"]
+    assert found[2]["what"] == "Other news"
+    assert found[0]["url"].endswith("/123/000126000003/a.htm")
+
+
+def test_contact_details_go_only_to_the_sec(monkeypatch):
+    from research import cache, config
+
+    monkeypatch.setattr(config, "USER_AGENT", "Jane Doe jane@example.com")
+    assert cache._headers("https://data.sec.gov/x.json")["User-Agent"] == "Jane Doe jane@example.com"
+    assert cache._headers("https://www.sec.gov/Archives/x")["User-Agent"] == "Jane Doe jane@example.com"
+    for other in ("https://query1.finance.yahoo.com/v8/x", "https://notsec.gov/x", "https://sec.gov.evil.com/x"):
+        assert "jane" not in cache._headers(other)["User-Agent"]
+
+
+def test_stale_copy_is_used_when_the_download_fails(monkeypatch, tmp_path):
+    import os
+    import requests
+    from research import cache, config
+
+    monkeypatch.setattr(config, "CACHE_DIR", tmp_path)
+    saved = tmp_path / "prices_X.json"
+    saved.write_text('{"old": true}')
+    os.utime(saved, (0, 0))  # make it look ancient
+
+    def refuse(*args, **kwargs):
+        raise requests.ConnectionError("refused")
+
+    monkeypatch.setattr(cache.requests, "get", refuse)
+    assert cache.fetch_json("https://example.com/x", "prices_X", max_age=60) == {"old": True}
+    import pytest
+    with pytest.raises(requests.ConnectionError):
+        cache.fetch_json("https://example.com/y", "prices_Y", max_age=60)

@@ -65,7 +65,8 @@ def compute_latest_metrics(latest_s: pd.Series, annual: pd.DataFrame) -> pd.Seri
 
 
 def compute_valuation(s: pd.DataFrame, m: pd.DataFrame, price: float,
-                      latest_s: pd.Series = None, latest_m: pd.Series = None) -> dict:
+                      latest_s: pd.Series = None, latest_m: pd.Series = None,
+                      shares_outstanding: float = None) -> dict:
     """Valuation multiples: today's price against the most recent year of results.
 
     That is the trailing twelve months when given, otherwise the latest fiscal year.
@@ -74,7 +75,9 @@ def compute_valuation(s: pd.DataFrame, m: pd.DataFrame, price: float,
         latest_s, latest_m = s.iloc[-1], m.iloc[-1]
 
     # Market cap: what all the shares are worth at today's price.
-    market_cap = price * latest_s["diluted_shares"]
+    # Uses the share count from the newest report's cover when there is one,
+    # otherwise the average diluted count over the period.
+    market_cap = price * (shares_outstanding or latest_s["diluted_shares"])
     # Enterprise value: the price of the whole business, i.e. shares plus debt
     # minus the cash you would get with it.
     enterprise_value = market_cap + latest_m["net_debt"]
@@ -89,6 +92,7 @@ def compute_valuation(s: pd.DataFrame, m: pd.DataFrame, price: float,
         "price": price,
         "market_cap": market_cap,
         "enterprise_value": enterprise_value,
+        "uses_cover_share_count": shares_outstanding is not None,
         "price_to_earnings": ratio(market_cap, latest_s["net_income"]),
         "ev_to_ebitda": ratio(enterprise_value, latest_m["ebitda"]),
         "ev_to_sales": ratio(enterprise_value, latest_s["revenue"]),

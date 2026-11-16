@@ -38,6 +38,7 @@ def run(ticker: str) -> dict:
         valuation = metrics.compute_valuation(
             annual, annual_metrics, float(price_history.iloc[-1]),
             latest["statements"], latest["metrics"],
+            statements.latest_shares_outstanding(facts, latest["statements"]["diluted_shares"]),
         )
         price_error = None
     except Exception as error:  # noqa: BLE001 - any failure means "no prices today"
@@ -55,6 +56,7 @@ def run(ticker: str) -> dict:
         "valuation": valuation,
         "price_error": price_error,
         "filings": edgar.get_recent_filings(cik),
+        "announcements": edgar.get_announcements(cik),
     }
 
 

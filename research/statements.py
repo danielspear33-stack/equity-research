@@ -222,3 +222,23 @@ def add_derived_lines(table: pd.DataFrame) -> pd.DataFrame:
         table["current_assets"] - table["cash_and_investments"].fillna(0)
     ) - (table["current_liabilities"] - short_term_debt)
     return table
+
+
+def latest_shares_outstanding(facts: dict, reference: float):
+    """The share count from the cover of the newest report, or None if unusable.
+
+    Market value should use the shares that exist today. The cover page of
+    each report states that number, and it is more current than the average
+    over the period. It is ignored when it is far from the period average,
+    which happens for companies with several share classes (the cover figure
+    covers only one class) and just after a stock split.
+    """
+    entry = facts.get("facts", {}).get("dei", {}).get("EntityCommonStockSharesOutstanding")
+    if not entry or reference is None or pd.isna(reference) or reference <= 0:
+        return None
+    rows = [row for unit in entry["units"].values() for row in unit]
+    if not rows:
+        return None
+    newest = max(rows, key=lambda row: (row["end"], row.get("filed", "")))
+    count = float(newest["val"])
+    return count if 0.7 <= count / reference <= 1.3 else None
