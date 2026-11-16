@@ -36,7 +36,11 @@ def render(data: dict, dcf_output, comps_result, bank_output=None, insider_summa
     include_report = st.checkbox("Include the annual report text", value=True, key=f"{ticker}_10k")
 
     # Route 1: Claude Code on this computer (uses your subscription, no extra charge).
-    if memo.claude_code_available():
+    if config.PUBLIC_DEMO:
+        st.info("One-click memos are switched off on this public demo, because they run on the "
+                "owner's own Claude account. You can still write one yourself with the claude.ai "
+                "option below, or run the tool on your own computer.")
+    elif memo.claude_code_available():
         if st.button("Write memo with Claude Code", type="primary", key=f"{ticker}_memo_cli",
                      help="Uses the Claude Code tool installed on this computer, which counts "
                           "against your Claude subscription's usage rather than charging per call."):
@@ -67,7 +71,7 @@ def render(data: dict, dcf_output, comps_result, bank_output=None, insider_summa
             store.save_memo(ticker, pasted.strip())
 
     # Route 3: the paid API, offered only if you have deliberately set a key.
-    if memo.api_key_configured():
+    if memo.api_key_configured() and not config.PUBLIC_DEMO:
         with st.expander("Or use the paid Claude API"):
             st.caption(f"Uses your API key and the model {config.MEMO_MODEL}. "
                        "This is billed per call, separately from a Claude subscription.")

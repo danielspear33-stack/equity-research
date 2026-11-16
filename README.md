@@ -1,7 +1,36 @@
 # Equity Research Tool
 
-Type a US-listed company's ticker and get a full valuation workup built from the
-company's own SEC filings and its share price:
+A valuation workbench for US-listed companies. Type a ticker and it pulls the
+company's own SEC filings and its share price, then builds the analysis an equity
+analyst would start from: a discounted cash flow model, a peer comparison, a
+bank-specific valuation where a DCF doesn't apply, and a plain-English health check.
+
+![Apple's overview page: price, DCF value, peer value and health check at a glance](docs/overview.png)
+
+## What it does
+
+- **Live data, no paid feeds.** Financial statements come straight from SEC EDGAR
+  (the XBRL figures companies file), prices from Yahoo Finance. Results are rebuilt
+  for the latest twelve months from quarterly reports, so the numbers are not a
+  year old.
+- **A DCF you can argue with.** Every assumption is editable, with a WACC build-up,
+  bear, base and bull cases, a sensitivity table, and a reverse DCF that shows the
+  growth today's price already assumes.
+- **The right model for the company.** Banks, insurers and brokers get a
+  price-to-book and dividend discount valuation in place of the DCF.
+- **Every method on one chart.** A "football field" sets the DCF, peer multiples
+  and the trading range against today's price.
+- **Checked by hand.** The calculations are covered by tests that compare them with
+  numbers worked out by hand on small made-up companies.
+
+| | |
+| --- | --- |
+| ![The DCF tab: value per share, bear, base and bull cases, and a sensitivity table](docs/dcf.png) | ![The valuation summary: every method as a bar against today's price](docs/summary.png) |
+| **DCF** with scenarios and sensitivity | **Valuation summary** across every method |
+
+![JPMorgan's bank valuation: book value, return on equity and three valuation methods](docs/bank.png)
+
+## The tabs
 
 - **Overview**: today's valuation, results for the latest twelve months, a health
   check (rule-of-thumb questions answered from the numbers), how the share price has
@@ -69,6 +98,17 @@ The memo tab offers two routes that use a Claude subscription:
    write the memo, which counts against your subscription's usage limits.
 2. **claude.ai** (by hand): download the prepared prompt file, attach it to a chat
    at claude.ai, and paste the memo back into the app.
+
+## Hosting a public copy
+
+The app runs as it is on [Streamlit Community Cloud](https://streamlit.io/cloud):
+point it at this repository and `app.py`, and add `SEC_USER_AGENT` (your name and
+contact email) under the app's Secrets.
+
+A hosted copy switches itself into public-demo mode (`PUBLIC_DEMO` in
+`research/config.py`). Each visitor's watchlist, assumptions and memos are kept in
+their own browser session and never written to disk, so strangers don't see each
+other's work, and the memo routes that would spend the owner's Claude usage are off.
 
 ## The daily refresh
 

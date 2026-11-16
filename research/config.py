@@ -24,6 +24,13 @@ USER_AGENT = (
     or "equity-research-tool/0.1 (student project)"
 )
 
+# The public demo is the copy hosted online for anyone to try. There, nothing a
+# visitor saves is written to disk (see store.py) and the memo routes that
+# would spend the owner's Claude usage are switched off. It is on when
+# PUBLIC_DEMO is set, or when running on Streamlit Community Cloud, which
+# keeps apps under /mount/src.
+PUBLIC_DEMO = bool(os.environ.get("PUBLIC_DEMO")) or str(PROJECT_ROOT).startswith("/mount/src/")
+
 # How long downloaded data is reused before being fetched again, in seconds.
 FILINGS_MAX_AGE = 24 * 60 * 60   # financial statements change four times a year
 PRICES_MAX_AGE = 60 * 60         # prices change all day

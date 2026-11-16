@@ -12,3 +12,6 @@ chartCategoricalColors = ["#5b9dff", "#f2b84b", "#4ecb9e", "#e2687a", "#a78bfa"]
 
 [browser]
 gatherUsageStats = false
+
+[client]
+toolbarMode = "minimal"

@@ -12,12 +12,33 @@ import pandas as pd
 from . import config
 
 
+def _visitor_data():
+    """On the public demo, a private scratch space for the current visitor.
+
+    Strangers share one hosted copy, so what one saves must not show up for
+    the next. Their watchlist, assumptions and memos live in their own browser
+    session and vanish when they leave. Returns None everywhere else.
+    """
+    if not config.PUBLIC_DEMO:
+        return None
+    import streamlit as st
+
+    return st.session_state.setdefault("_visitor_data", {})
+
+
 def _read(name: str, default):
+    visitor = _visitor_data()
+    if visitor is not None:
+        return json.loads(visitor[name]) if name in visitor else default
     path = config.USER_DATA_DIR / name
     return json.loads(path.read_text()) if path.exists() else default
 
 
 def _write(name: str, data) -> None:
+    visitor = _visitor_data()
+    if visitor is not None:
+        visitor[name] = json.dumps(data)
+        return
     config.USER_DATA_DIR.mkdir(exist_ok=True)
     (config.USER_DATA_DIR / name).write_text(json.dumps(data, indent=1, sort_keys=True) + "\n")
 
@@ -95,11 +116,18 @@ def save_snapshot(row: dict, today: date = None) -> None:
 # ---- AI memos ----
 
 def get_memo(ticker: str):
+    visitor = _visitor_data()
+    if visitor is not None:
+        return visitor.get(f"memos/{ticker}")
     path = config.USER_DATA_DIR / "memos" / f"{ticker}.md"
     return path.read_text() if path.exists() else None
 
 
 def save_memo(ticker: str, text: str) -> None:
+    visitor = _visitor_data()
+    if visitor is not None:
+        visitor[f"memos/{ticker}"] = text
+        return
     folder = config.USER_DATA_DIR / "memos"
     folder.mkdir(parents=True, exist_ok=True)
     (folder / f"{ticker}.md").write_text(text)

@@ -129,3 +129,21 @@ def test_claude_code_failure_is_reported(monkeypatch):
 def test_chat_prompt_contains_instructions_and_data():
     text = memo.prompt_for_chat("the numbers")
     assert "do not give a buy, sell or hold" in text and "the numbers" in text
+
+
+def test_public_demo_keeps_each_visitors_data_off_the_disk(tmp_path, monkeypatch):
+    # Two visitors to the hosted demo: neither sees the other's saves, and
+    # nothing is written to the shared folder.
+    first, second = {}, {}
+    monkeypatch.setattr(store, "_visitor_data", lambda: first)
+    store.add_to_watchlist("AAPL")
+    store.save_assumptions("AAPL", {"wacc": 0.09})
+    store.save_memo("AAPL", "A memo.")
+    assert store.get_watchlist() == ["AAPL"]
+    assert store.get_memo("AAPL") == "A memo."
+
+    monkeypatch.setattr(store, "_visitor_data", lambda: second)
+    assert store.get_watchlist() == []
+    assert store.get_assumptions("AAPL") is None
+    assert store.get_memo("AAPL") is None
+    assert list(tmp_path.iterdir()) == []

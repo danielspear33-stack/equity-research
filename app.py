@@ -29,6 +29,11 @@ def load_insiders(cik: int):
     return insiders.get_trades(cik)
 
 
+# Shown on the empty start page so a first-time visitor has something to click.
+# JPMorgan is there to show the bank valuation that replaces the DCF.
+EXAMPLES = {"AAPL": "Apple", "COST": "Costco", "JPM": "JPMorgan", "NFLX": "Netflix"}
+
+
 def open_company(ticker: str) -> None:
     st.session_state["ticker"] = ticker.strip().upper()
     st.session_state["page"] = "company"
@@ -69,6 +74,10 @@ if not ticker:
         "share price, then shows its latest results, a health check, a DCF (or a bank "
         "valuation), a peer comparison, payouts to shareholders and insider trades."
     )
+    st.caption("Or start with one of these:")
+    for column, (example, name) in zip(st.columns(len(EXAMPLES)), EXAMPLES.items()):
+        column.button(f"{example} · {name}", key=f"example_{example}", width="stretch",
+                      on_click=open_company, args=(example,))
     st.stop()
 
 try:
