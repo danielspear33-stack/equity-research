@@ -1,6 +1,7 @@
 import numpy as np
 import pandas as pd
 import pytest
+import requests
 
 from research import comps, filings, market
 
@@ -70,3 +71,17 @@ def test_sections_come_from_the_body_not_the_table_of_contents():
     assert "Suppliers are concentrated" in sections["1A"]
     assert "Unresolved" not in sections["1A"]
     assert "prices rose" in sections["7"] and "Rates" not in sections["7"]
+
+
+def test_tickers_are_found_in_the_saved_list_without_any_download(monkeypatch):
+    from research import edgar
+
+    def no_network(*args, **kwargs):
+        raise requests.ConnectionError("offline")
+
+    monkeypatch.setattr(edgar, "fetch_json", no_network)
+    assert len(edgar.company_list()) > 5000
+    assert edgar.lookup_cik("aapl") == 320193
+    assert edgar.lookup_cik("BRK.B") == 1067983      # written BRK-B in the SEC's list
+    with pytest.raises(edgar.TickerNotFound):
+        edgar.lookup_cik("NOTREAL")

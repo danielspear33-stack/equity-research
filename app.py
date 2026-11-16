@@ -5,7 +5,7 @@ Run it with:  streamlit run app.py
 
 import streamlit as st
 
-from research import insiders, report, store
+from research import edgar, insiders, report, store
 from research.edgar import TickerNotFound
 from views import (bank_tab, comps_tab, dcf_tab, glance, memo_tab, overview, payouts_tab,
                    quarterly_tab, style, summary_tab, watchlist)
@@ -29,14 +29,16 @@ def load_insiders(cik: int):
     return insiders.get_trades(cik)
 
 
-# Shown on the empty start page so a first-time visitor has something to click.
-# JPMorgan is there to show the bank valuation that replaces the DCF.
-EXAMPLES = {"AAPL": "Apple", "COST": "Costco", "JPM": "JPMorgan", "NFLX": "Netflix"}
-
-
 def open_company(ticker: str) -> None:
     st.session_state["ticker"] = ticker.strip().upper()
     st.session_state["page"] = "company"
+
+
+def open_picked_company() -> None:
+    """Opens the company chosen in the start page's search box."""
+    picked = st.session_state.get("start_search")
+    if picked is not None:
+        open_company(edgar.company_list()[picked][0])
 
 
 # A link like ?ticker=AAPL opens that company directly.
@@ -68,16 +70,20 @@ if st.session_state["page"] == "watchlist":
 
 ticker = st.session_state.get("ticker", "")
 if not ticker:
-    st.header("Search a company to begin")
-    st.write(
-        "Type a US-listed company's ticker in the sidebar. The tool pulls its SEC filings and "
-        "share price, then shows its latest results, a health check, a DCF (or a bank "
-        "valuation), a peer comparison, payouts to shareholders and insider trades."
+    companies = edgar.company_list()
+    st.header("Search a company")
+    st.selectbox(
+        "Company", range(len(companies)), index=None, key="start_search",
+        format_func=lambda i: f"{companies[i][0]} · {companies[i][2]}",
+        placeholder="Type a ticker or a company name", label_visibility="collapsed",
+        on_change=open_picked_company,
     )
-    st.caption("Or start with one of these:")
-    for column, (example, name) in zip(st.columns(len(EXAMPLES)), EXAMPLES.items()):
-        column.button(f"{example} · {name}", key=f"example_{example}", width="stretch",
-                      on_click=open_company, args=(example,))
+    st.caption(
+        f"Covers every company with shares listed in the US: {len(companies):,} tickers, from "
+        "the SEC's own list. The tool pulls the company's filings and share price, then shows "
+        "its latest results, a health check, a DCF (or a bank valuation), a peer comparison, "
+        "payouts to shareholders and insider trades."
+    )
     st.stop()
 
 try:

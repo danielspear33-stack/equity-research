@@ -6,6 +6,7 @@ CIK, then download two things for it:
   * "company facts": every number the company has tagged in its filings
 """
 
+import functools
 import json
 
 import requests
@@ -22,27 +23,52 @@ class TickerNotFound(Exception):
     pass
 
 
+@functools.lru_cache(maxsize=1)
+def company_list() -> list:
+    """Every company with shares listed in the US: [ticker, SEC ID, name], biggest first.
+
+    This is the SEC's own list (about 10,000 tickers), saved in the project so
+    looking a company up needs no download. The daily refresh keeps it current.
+    """
+    return json.loads(config.COMPANY_LIST_FILE.read_text())
+
+
+def update_company_list() -> int:
+    """Download the SEC's current list and save it. Returns how many tickers it holds."""
+    listing = fetch_json(TICKER_LIST_URL, "sec_ticker_list", config.TICKER_LIST_MAX_AGE)
+    rows = [[row["ticker"].upper(), int(row["cik_str"]), row["title"]] for row in listing.values()]
+    if len(rows) < 5000:  # a truncated download must not wipe out the saved list
+        raise ValueError(f"The SEC's list came back with only {len(rows)} tickers; keeping the old one.")
+    lines = ",\n".join(json.dumps(row) for row in rows)
+    config.COMPANY_LIST_FILE.write_text(f"[\n{lines}\n]\n")
+    company_list.cache_clear()
+    return len(rows)
+
+
 def lookup_cik(ticker: str) -> int:
     """Turn a ticker like 'AAPL' into the SEC's company ID."""
     ticker = ticker.strip().upper().replace(".", "-")
 
-    seed = json.loads(config.SEED_TICKERS_FILE.read_text())
-    if ticker in seed:
-        return seed[ticker]
+    for listed, cik, _ in company_list():
+        if listed == ticker:
+            return cik
 
+    # Not in the saved list: it may have listed since the list was last
+    # updated, so ask the SEC directly before giving up.
     try:
         listing = fetch_json(TICKER_LIST_URL, "sec_ticker_list", config.TICKER_LIST_MAX_AGE)
-    except requests.HTTPError as error:
+    except requests.RequestException as error:
         raise TickerNotFound(
-            f"{ticker} is not in the built-in list, and the SEC refused to send its "
-            f"full ticker list ({error.response.status_code}). Set the SEC_USER_AGENT "
-            "environment variable to your name and email, as the SEC requires."
+            f"No US-listed company found for ticker {ticker}. (The SEC's live list could not "
+            "be checked for very recent listings.)"
         ) from error
-
     for row in listing.values():
         if row["ticker"].upper() == ticker:
             return int(row["cik_str"])
-    raise TickerNotFound(f"No SEC-registered company found for ticker {ticker}.")
+    raise TickerNotFound(
+        f"No US-listed company found for ticker {ticker}. Companies listed only outside the "
+        "US are not covered."
+    )
 
 
 def get_profile(cik: int) -> dict:

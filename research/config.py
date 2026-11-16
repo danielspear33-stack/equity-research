@@ -5,7 +5,7 @@ from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 CACHE_DIR = PROJECT_ROOT / ".cache"
-SEED_TICKERS_FILE = PROJECT_ROOT / "data" / "seed_tickers.json"
+COMPANY_LIST_FILE = PROJECT_ROOT / "data" / "companies.json"
 SEED_SIC_FILE = PROJECT_ROOT / "data" / "seed_sic.json"
 PEER_GROUPS_FILE = PROJECT_ROOT / "data" / "peer_groups.json"
 # Your own saved data: watchlist, DCF assumptions, peers, daily snapshots, memos.

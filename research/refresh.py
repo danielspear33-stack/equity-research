@@ -6,7 +6,7 @@ GitHub Actions runs it automatically every weekday (see .github/workflows).
 
 import sys
 
-from . import config, report, store
+from . import config, edgar, report, store
 
 
 def snapshot_for(ticker: str) -> dict:
@@ -58,6 +58,12 @@ def refresh_all(tickers=None) -> tuple:
 
 
 def main() -> int:
+    # Pick up newly listed companies and ticker changes.
+    try:
+        print(f"Company list updated: {edgar.update_company_list():,} tickers.")
+    except Exception as error:  # noqa: BLE001 - the saved list still works
+        print(f"Company list not updated: {error}")
+
     watchlist = store.get_watchlist()
     if not watchlist:
         print("Watchlist is empty. Follow a company in the app first.")

@@ -88,7 +88,7 @@ Environment variables you set before starting the app.
 
 | Variable | What it unlocks |
 | --- | --- |
-| `SEC_USER_AGENT` | Set to your name and contact email, or put the same text in a file called `sec_contact.txt` in this folder. The SEC only serves its full ticker list and the text of annual reports to tools that identify themselves. Without it, about 125 built-in tickers work and the AI memo runs without the annual report. |
+| `SEC_USER_AGENT` | Set to your name and contact email, or put the same text in a file called `sec_contact.txt` in this folder. The SEC asks automated tools to identify themselves and may refuse some downloads (such as the text of annual reports) to those that don't. |
 | `ANTHROPIC_API_KEY` | Not needed. Only if you set it does the app offer a third, pay-per-call way to write the memo. |
 
 ### Writing the AI memo without paying per use
@@ -115,7 +115,8 @@ other's work, and the memo routes that would spend the owner's Claude usage are 
 ## The daily refresh
 
 `python -m research.refresh` re-runs every company on your watchlist and adds one
-row per company to `userdata/snapshots.csv`.
+row per company to `userdata/snapshots.csv`. It also updates the list of US-listed
+companies in `data/companies.json`.
 
 `.github/workflows/daily-refresh.yml` runs that command on GitHub every weekday at
 22:30 UTC (after the US market closes) and commits the new snapshot. To turn it on:
@@ -132,7 +133,7 @@ watchlist marks filings from the last week as new.
 
 | File | Job |
 | --- | --- |
-| `research/edgar.py` | Turns a ticker into the SEC's company ID; downloads filing data and the list of recent filings |
+| `research/edgar.py` | The list of every US-listed company; turns a ticker into the SEC's company ID; downloads filing data and the list of recent filings |
 | `research/statements.py` | Picks the annual figures out of the raw filing data into one table |
 | `research/quarterly.py` | Single quarters and the trailing twelve months, from quarterly reports |
 | `research/metrics.py` | Margins, growth, returns, leverage and valuation multiples |
@@ -169,8 +170,11 @@ These are judgement calls, set in `research/config.py`:
 
 ## Known limitations
 
-- **US filers only.** Companies that don't file annual 10-K reports (most foreign
-  and Canada-only listings) are not supported.
+- **US-listed companies only.** Any of the roughly 10,000 tickers on the SEC's list
+  can be searched by ticker or name (`data/companies.json`, updated by the daily
+  refresh). Companies listed only outside the US are not covered, and foreign
+  companies that file a 20-F or 40-F instead of a 10-K annual report (many ADRs and
+  Canadian companies) are found but can't be analysed.
 - **Banks and insurers** get a simpler valuation (price-to-book and dividends) in
   place of the DCF. It ignores things specialists look at, such as capital ratios
   and loan losses.

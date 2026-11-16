@@ -29,6 +29,6 @@ jobs:
         run: |
           git config user.name "watchlist-refresh"
           git config user.email "actions@users.noreply.github.com"
-          git add userdata
-          git diff --cached --quiet || git commit -m "Daily watchlist snapshot"
+          git add userdata data/companies.json
+          git diff --cached --quiet || git commit -m "Daily refresh"
           git push
