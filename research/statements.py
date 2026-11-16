@@ -1,0 +1,172 @@
+"""Turns the SEC's raw "company facts" into one clean table of annual figures.
+
+Companies label each number in their filings with a standard tag, but different
+companies (and the same company in different years) use different tags for the
+same idea. For each line we care about, we list the tags to try, in order.
+"""
+
+from datetime import date
+
+import pandas as pd
+
+# Figures measured over a full year (income statement and cash flow statement).
+FLOW_TAGS = {
+    "revenue": [
+        "RevenueFromContractWithCustomerExcludingAssessedTax",
+        "Revenues",
+        "SalesRevenueNet",
+        "RevenueFromContractWithCustomerIncludingAssessedTax",
+    ],
+    "cost_of_revenue": ["CostOfGoodsAndServicesSold", "CostOfRevenue"],
+    "gross_profit": ["GrossProfit"],
+    "operating_income": ["OperatingIncomeLoss"],
+    "pretax_income": [
+        "IncomeLossFromContinuingOperationsBeforeIncomeTaxesExtraordinaryItemsNoncontrollingInterest",
+        "IncomeLossFromContinuingOperationsBeforeIncomeTaxesMinorityInterestAndIncomeLossFromEquityMethodInvestments",
+    ],
+    "income_tax": ["IncomeTaxExpenseBenefit"],
+    "net_income": ["NetIncomeLoss"],
+    "d_and_a": [
+        "DepreciationDepletionAndAmortization",
+        "DepreciationAndAmortization",
+        "DepreciationAmortizationAndAccretionNet",
+        "DepreciationAmortizationAndOther",
+    ],
+    # Used only when a company reports the two halves of D&A separately.
+    "depreciation": ["Depreciation"],
+    "amortization": ["AmortizationOfIntangibleAssets"],
+    "cash_from_operations": [
+        "NetCashProvidedByUsedInOperatingActivities",
+        "NetCashProvidedByUsedInOperatingActivitiesContinuingOperations",
+    ],
+    "capex": ["PaymentsToAcquirePropertyPlantAndEquipment", "PaymentsToAcquireProductiveAssets"],
+    "interest_expense": [
+        "InterestExpense",
+        "InterestExpenseNonoperating",
+        "InterestAndDebtExpense",
+        "InterestExpenseDebt",
+    ],
+    "diluted_shares": [
+        "WeightedAverageNumberOfDilutedSharesOutstanding",
+        "WeightedAverageNumberOfSharesOutstandingBasic",
+    ],
+    "eps_diluted": ["EarningsPerShareDiluted"],
+}
+
+# Figures measured on a single day (balance sheet).
+BALANCE_TAGS = {
+    "total_assets": ["Assets"],
+    "current_assets": ["AssetsCurrent"],
+    "current_liabilities": ["LiabilitiesCurrent"],
+    "equity": [
+        "StockholdersEquity",
+        "StockholdersEquityIncludingPortionAttributableToNoncontrollingInterest",
+    ],
+    "cash": ["CashAndCashEquivalentsAtCarryingValue"],
+    "short_term_investments": [
+        "MarketableSecuritiesCurrent",
+        "ShortTermInvestments",
+        "AvailableForSaleSecuritiesDebtSecuritiesCurrent",
+    ],
+    "debt_noncurrent": ["LongTermDebtNoncurrent", "LongTermDebtAndCapitalLeaseObligations"],
+    "debt_current": [
+        "LongTermDebtCurrent",
+        "LongTermDebtAndCapitalLeaseObligationsCurrent",
+        "DebtCurrent",
+    ],
+    "short_term_borrowings": ["CommercialPaper", "ShortTermBorrowings", "NotesAndLoansPayable"],
+    "debt_combined": ["LongTermDebt", "DebtLongtermAndShorttermCombinedAmount"],
+}
+
+ANNUAL_FORMS = {"10-K", "10-K/A"}
+
+
+def _annual_values(facts: dict, tag: str, full_year: bool) -> dict:
+    """Return {period end date: value} for one tag, from annual reports only.
+
+    A 10-K repeats prior years for comparison, so the same period can appear
+    several times. We keep the most recently filed value, which picks up any
+    restatement.
+    """
+    entry = facts.get("facts", {}).get("us-gaap", {}).get(tag)
+    if not entry:
+        return {}
+
+    latest = {}  # end date -> (filed date, value)
+    for rows in entry["units"].values():
+        for row in rows:
+            if row.get("form") not in ANNUAL_FORMS:
+                continue
+            if full_year:
+                if "start" not in row:
+                    continue
+                days = (date.fromisoformat(row["end"]) - date.fromisoformat(row["start"])).days
+                if not 340 <= days <= 380:  # skip the quarterly figures inside a 10-K
+                    continue
+            elif "start" in row:
+                continue
+            end = row["end"]
+            if end not in latest or row["filed"] > latest[end][0]:
+                latest[end] = (row["filed"], row["val"])
+    return {end: value for end, (_, value) in latest.items()}
+
+
+def _first_available(facts: dict, tags: list, full_year: bool) -> dict:
+    """Merge several candidate tags, preferring earlier ones year by year."""
+    merged = {}
+    for tag in tags:
+        for end, value in _annual_values(facts, tag, full_year).items():
+            merged.setdefault(end, value)
+    return merged
+
+
+def build_annual_statements(facts: dict, years: int = 10) -> pd.DataFrame:
+    """One row per fiscal year (indexed by year-end date), one column per line."""
+    columns = {name: _first_available(facts, tags, True) for name, tags in FLOW_TAGS.items()}
+    columns.update(
+        {name: _first_available(facts, tags, False) for name, tags in BALANCE_TAGS.items()}
+    )
+
+    # The fiscal years are the periods we have revenue or net income for.
+    year_ends = sorted(set(columns["revenue"]) | set(columns["net_income"]))
+    table = pd.DataFrame(columns, index=year_ends, dtype="float64")
+    table = table.reindex(year_ends).tail(years)
+    table.index = pd.to_datetime(table.index)
+    table.index.name = "fiscal_year_end"
+
+    # Gross profit isn't always tagged; it is revenue minus the cost of making the product.
+    table["gross_profit"] = table["gross_profit"].fillna(
+        table["revenue"] - table["cost_of_revenue"]
+    )
+
+    # Some companies (Exxon, for one) never report operating income. Rebuild an
+    # approximation by adding interest cost back to profit before tax.
+    table["operating_income"] = table["operating_income"].fillna(
+        table["pretax_income"] + table["interest_expense"].fillna(0)
+    )
+
+    # Same idea for depreciation and amortization.
+    table["d_and_a"] = table["d_and_a"].fillna(
+        table[["depreciation", "amortization"]].sum(axis=1, min_count=1)
+    )
+
+    # Total debt: add up the pieces if the company reports them separately,
+    # otherwise fall back to a single combined figure. This is an approximation:
+    # companies tag debt inconsistently, and lease obligations are mostly left out.
+    pieces = table[["debt_noncurrent", "debt_current", "short_term_borrowings"]]
+    summed = pieces.sum(axis=1, min_count=1)
+    table["total_debt"] = summed.where(table["debt_noncurrent"].notna(), table["debt_combined"])
+    table["total_debt"] = table["total_debt"].fillna(summed)
+
+    table["cash_and_investments"] = table[["cash", "short_term_investments"]].sum(
+        axis=1, min_count=1
+    )
+
+    # Operating working capital: money tied up in day-to-day trading (stock,
+    # unpaid customer bills) net of what the company owes suppliers. Cash and
+    # debt are taken out because they are financing, not operations.
+    short_term_debt = table[["debt_current", "short_term_borrowings"]].sum(axis=1).fillna(0)
+    table["working_capital"] = (
+        table["current_assets"] - table["cash_and_investments"].fillna(0)
+    ) - (table["current_liabilities"] - short_term_debt)
+    return table
