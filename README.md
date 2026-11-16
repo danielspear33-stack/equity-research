@@ -5,6 +5,8 @@ company's own SEC filings and its share price, then builds the analysis an equit
 analyst would start from: a discounted cash flow model, a peer comparison, a
 bank-specific valuation where a DCF doesn't apply, and a plain-English health check.
 
+**[Try the live demo](https://equity-workbench.streamlit.app/?ticker=AAPL)** (it may take a moment to wake up if nobody has used it recently).
+
 ![Apple's overview page: price, DCF value, peer value and health check at a glance](docs/overview.png)
 
 ## What it does
