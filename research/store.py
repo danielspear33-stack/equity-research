@@ -115,19 +115,56 @@ def save_snapshot(row: dict, today: date = None) -> None:
 
 # ---- AI memos ----
 
-def get_memo(ticker: str):
+def _read_text(name: str):
     visitor = _visitor_data()
     if visitor is not None:
-        return visitor.get(f"memos/{ticker}")
-    path = config.USER_DATA_DIR / "memos" / f"{ticker}.md"
+        return visitor.get(name)
+    path = config.USER_DATA_DIR / name
     return path.read_text() if path.exists() else None
 
 
-def save_memo(ticker: str, text: str) -> None:
+def _write_text(name: str, text: str) -> None:
     visitor = _visitor_data()
     if visitor is not None:
-        visitor[f"memos/{ticker}"] = text
+        visitor[name] = text
         return
-    folder = config.USER_DATA_DIR / "memos"
-    folder.mkdir(parents=True, exist_ok=True)
-    (folder / f"{ticker}.md").write_text(text)
+    path = config.USER_DATA_DIR / name
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text)
+
+
+def get_memo(ticker: str):
+    return _read_text(f"memos/{ticker}.md")
+
+
+def get_memo_details(ticker: str) -> dict:
+    """When the memo was written, which results it was based on, and its fact-check."""
+    return _read(f"memos/{ticker}.json", {})
+
+
+def save_memo(ticker: str, text: str, details: dict = None) -> None:
+    _write_text(f"memos/{ticker}.md", text)
+    _write_text(f"memos/{ticker}.json", json.dumps(details or {}, indent=1) + "\n")
+
+
+# ---- What changed between annual reports ----
+
+def get_filing_changes(ticker: str) -> dict:
+    """The saved comparison of the last two annual reports, or {}."""
+    return _read(f"changes/{ticker}.json", {})
+
+
+def save_filing_changes(ticker: str, comparison: dict) -> None:
+    _write_text(f"changes/{ticker}.json", json.dumps(comparison, indent=1) + "\n")
+
+
+# ---- Settings ----
+
+def get_setting(name: str, default):
+    return _read("settings.json", {}).get(name, default)
+
+
+def save_setting(name: str, value) -> None:
+    settings = _read("settings.json", {})
+    settings[name] = value
+    _write("settings.json", settings)

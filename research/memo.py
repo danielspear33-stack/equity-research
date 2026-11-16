@@ -20,7 +20,7 @@ import anthropic
 
 import pandas as pd
 
-from . import checks, comps, config, filings, payouts, pricestats
+from . import checks, comps, config, edgar, filings, payouts, pricestats
 
 SYSTEM_PROMPT = """You are an equity research analyst writing a briefing memo for an \
 individual investor who is learning to analyse companies. They will make their own \
@@ -224,6 +224,29 @@ def build_context(report: dict, dcf_result, assumptions, wacc_parts, user_set: b
     return "\n".join(parts)
 
 
+def full_context(report: dict, dcf_output, comps_result, bank_output=None,
+                 insider_summary=None, include_report: bool = True) -> tuple:
+    """Everything for the memo, fetching the annual report if wanted.
+
+    Returns (the text for the model, a warning or None). A missing annual
+    report is a warning, not a failure: the memo is written from the numbers.
+    """
+    sections, warning = None, None
+    if include_report:
+        try:
+            # Ask for the latest 10-K specifically: it is often older than
+            # the handful of recent filings shown on the overview tab.
+            annual = edgar.get_recent_filings(report["cik"], forms=("10-K",), limit=1)
+            sections, _ = filings.get_annual_report_sections(annual)
+        except Exception as error:  # noqa: BLE001
+            warning = f"Written without the annual report. {error}"
+    result, assumptions, wacc_parts, user_set = dcf_output or (None, None, None, False)
+    extras = build_extras(report, bank_output, insider_summary)
+    context = build_context(report, result, assumptions, wacc_parts, user_set, comps_result,
+                            sections, extras)
+    return context, warning
+
+
 class MemoError(Exception):
     pass
 
@@ -286,8 +309,8 @@ def claude_code_available() -> bool:
     return claude_code_path() is not None
 
 
-def write_with_claude_code(context: str) -> str:
-    """Have the Claude Code command-line tool write the memo.
+def ask_claude_code(system_prompt: str, prompt: str) -> str:
+    """Have the Claude Code command-line tool answer one prompt and return its reply.
 
     Claude Code signs in with your Claude account, so this counts against your
     subscription's usage instead of being billed per call.
@@ -299,9 +322,9 @@ def write_with_claude_code(context: str) -> str:
             result = subprocess.run(
                 # -p: answer once and exit. --tools "": it only writes, it can't
                 # run commands or touch files.
-                [claude_code_path() or "claude", "-p", "--system-prompt", SYSTEM_PROMPT,
+                [claude_code_path() or "claude", "-p", "--system-prompt", system_prompt,
                  "--tools", ""],
-                input=context, capture_output=True, text=True, timeout=900,
+                input=prompt, capture_output=True, text=True, timeout=900,
                 cwd=empty_folder, env=environment,
             )
         except subprocess.TimeoutExpired as error:
@@ -309,10 +332,15 @@ def write_with_claude_code(context: str) -> str:
     if result.returncode != 0 or not result.stdout.strip():
         detail = (result.stderr or result.stdout).strip()[-400:]
         raise MemoError(
-            "Claude Code couldn't write the memo. Check you are signed in: open Terminal, "
+            "Claude Code couldn't write this. Check you are signed in: open Terminal, "
             f"run `claude auth login` and follow the browser prompt. Details: {detail or 'no output'}"
         )
     return result.stdout.strip()
+
+
+def write_with_claude_code(context: str) -> str:
+    """Have Claude Code write the memo from the prepared data."""
+    return ask_claude_code(SYSTEM_PROMPT, context)
 
 
 # ---- Free route 2: paste it into claude.ai yourself ----

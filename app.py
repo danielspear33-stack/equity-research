@@ -7,8 +7,8 @@ import streamlit as st
 
 from research import edgar, insiders, report, store
 from research.edgar import TickerNotFound
-from views import (bank_tab, comps_tab, dcf_tab, glance, memo_tab, overview, payouts_tab,
-                   quarterly_tab, style, summary_tab, watchlist)
+from views import (backtest_page, bank_tab, changes_tab, comps_tab, dcf_tab, glance, memo_tab,
+                   overview, payouts_tab, quarterly_tab, style, summary_tab, watchlist)
 
 st.set_page_config(page_title="Equity Research", page_icon="📊", layout="wide")
 style.apply()
@@ -83,8 +83,25 @@ with st.sidebar:
     if not followed:
         st.caption("Companies you follow appear here.")
 
+    st.divider()
+    if st.button("Backtest the model", width="stretch",
+                 help="Would the model's cheap and expensive calls have been right in the past?"):
+        st.session_state["page"] = "backtest"
+    if memo_tab.can_write_here():
+        st.toggle(
+            "Run AI analysis automatically", value=store.get_setting("auto_ai", True), key="auto_ai",
+            on_change=lambda: store.save_setting("auto_ai", st.session_state["auto_ai"]),
+            help="When you open a company, Claude starts writing its memo and comparing its last "
+                 "two annual reports straight away, in the background. Saved results are reused "
+                 "until the company reports again. Turn this off when flicking through many "
+                 "companies, to save your Claude usage.",
+        )
+
 if st.session_state["page"] == "watchlist":
     watchlist.render()
+    st.stop()
+if st.session_state["page"] == "backtest":
+    backtest_page.render()
     st.stop()
 
 ticker = st.session_state.get("ticker", "")
@@ -144,9 +161,9 @@ at_a_glance = st.container()
 # Market data first, then this tool's own analysis (style.MARKET_DATA_TABS
 # says where the split is, and colours the second group gold).
 style.legend()
-(overview_tab, quarterly, payouts, valuation, peers, summary, ai_memo) = st.tabs(
+(overview_tab, quarterly, payouts, valuation, peers, summary, filing_changes, ai_memo) = st.tabs(
     ["Overview", "Quarterly", "Payouts & insiders",
-     "Bank valuation" if is_financial else "DCF", "Comps", "Valuation summary", "AI memo"])
+     "Bank valuation" if is_financial else "DCF", "Comps", "Valuation summary", "Filing changes", "AI memo"])
 
 with overview_tab:
     overview.render(data)
@@ -162,6 +179,8 @@ with peers:
     comps_result = comps_tab.render(data, load_comps)
 with summary:
     summary_tab.render(data, dcf_output, comps_result, bank_output)
+with filing_changes:
+    changes_tab.render(data)
 with ai_memo:
     memo_tab.render(data, dcf_output, comps_result, bank_output, insider_summary)
 with at_a_glance:

@@ -11,7 +11,7 @@ from html.parser import HTMLParser
 
 import requests
 
-from . import config
+from .cache import fetch_text
 
 SECTIONS = {"1": "Business", "1A": "Risk Factors", "7": "Management's Discussion and Analysis"}
 
@@ -74,22 +74,31 @@ def extract_sections(text: str) -> dict:
     return sections
 
 
+def sections_of(filing: dict) -> dict:
+    """{item number: text} for one annual report.
+
+    The document is saved after the first download and never fetched again:
+    a filing doesn't change once it is filed.
+    """
+    try:
+        html = fetch_text(filing["url"], f"filing_{filing['accession']}.html")
+    except requests.HTTPError as error:
+        if error.response is not None and error.response.status_code == 403:
+            raise PermissionError(
+                "The SEC refused to send the annual report. It only serves documents to tools "
+                "that identify themselves: set the SEC_USER_AGENT environment variable to your "
+                "name and email."
+            ) from error
+        raise
+    sections = extract_sections(html_to_text(html))
+    if not sections:
+        raise ValueError("Couldn't find the standard sections in the annual report.")
+    return sections
+
+
 def get_annual_report_sections(filings: list) -> tuple:
     """Fetch the latest 10-K and return ({item: text}, the filing used)."""
     annual = next((f for f in filings if f["form"] == "10-K"), None)
     if annual is None:
         raise ValueError("No 10-K found among the company's recent filings.")
-    response = requests.get(
-        annual["url"], headers={"User-Agent": config.USER_AGENT}, timeout=config.REQUEST_TIMEOUT
-    )
-    if response.status_code == 403:
-        raise PermissionError(
-            "The SEC refused to send the annual report. It only serves documents to tools "
-            "that identify themselves: set the SEC_USER_AGENT environment variable to your "
-            "name and email."
-        )
-    response.raise_for_status()
-    sections = extract_sections(html_to_text(response.text))
-    if not sections:
-        raise ValueError("Couldn't find the standard sections in the annual report.")
-    return sections, annual
+    return sections_of(annual), annual

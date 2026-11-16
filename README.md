@@ -22,6 +22,16 @@ bank-specific valuation where a DCF doesn't apply, and a plain-English health ch
   price-to-book and dividend discount valuation in place of the DCF.
 - **Every method on one chart.** A "football field" sets the DCF, peer multiples
   and the trading range against today's price.
+- **AI that is checked, not trusted.** Claude writes a one-page briefing from the
+  numbers and the annual report, then every figure in it is checked against the
+  source data and anything that can't be traced is flagged.
+- **What changed in the filings.** The last two annual reports are compared paragraph
+  by paragraph; Claude reads only the paragraphs that differ and says which risks
+  were added or dropped and how management's description of the business moved.
+- **A backtest of its own signal.** The DCF is re-run on what was known in each past
+  year to see whether shares it called cheap went on to beat the ones it called
+  expensive. On its mechanical defaults, across about 100 large companies from 2019
+  to 2025, they did not, and the page says so.
 - **Checked by hand.** The calculations are covered by tests that compare them with
   numbers worked out by hand on small made-up companies.
 
@@ -48,10 +58,16 @@ bank-specific valuation where a DCF doesn't apply, and a plain-English health ch
 - **Valuation summary**: every method on one "football field" chart against the price.
 - **Payouts & insiders**: dividends, buybacks, the share count, pay in shares, and
   what directors and executives have been buying and selling.
+- **Filing changes**: what is new, removed or reworded in the latest annual report
+  compared with the one before, with an AI summary and every changed paragraph listed.
 - **AI memo**: Claude reads the numbers and the annual report and writes a one-page
-  briefing. It explains and questions; it does not make a buy or sell call. It runs
-  on your Claude subscription, with no per-use charge.
+  briefing. It explains and questions; it does not make a buy or sell call. It starts
+  writing in the background as soon as you open a company, and a fact-check line shows
+  how many of its figures match the data. It runs on your Claude subscription, with
+  no per-use charge.
 - **Watchlist**: follow companies and get a snapshot of each one every weekday.
+- **Backtest** (in the sidebar): how the model's cheap and expensive calls would have
+  done in past years, with its limitations spelled out.
 
 Every company page opens with an at-a-glance strip: price, market value, the DCF
 value, what peers imply, the growth the price implies and the health-check score,
@@ -148,6 +164,10 @@ watchlist marks filings from the last week as new.
 | `research/comps.py` | Peer suggestions, peer multiples and implied values |
 | `research/filings.py` | Downloads the annual report and extracts the key sections |
 | `research/memo.py` | Builds the prompt and calls Claude for the memo |
+| `research/factcheck.py` | Checks each figure in an AI memo against the data the AI was given |
+| `research/changes.py` | Compares the last two annual reports and has Claude summarise the differences |
+| `research/backtest.py` | Re-runs the DCF on past data and measures what happened next |
+| `research/background.py` | Runs the slow AI jobs without freezing the screen |
 | `research/store.py` | Saves your watchlist, assumptions, peers, snapshots and memos in `userdata/` |
 | `research/refresh.py` | The daily refresh |
 | `research/report.py` | Ties the pieces together for one ticker |
@@ -168,7 +188,29 @@ These are judgement calls, set in `research/config.py`:
   they produce a DCF value well below the share price; the reverse DCF shows what
   growth the price needs instead.
 
+## How the AI is kept honest
+
+- The model is given only what this tool computed plus the company's own filing text,
+  and is told to say when something is missing rather than fill it in from memory.
+- After a memo is written, every dollar amount, percentage and multiple in it is looked
+  up in that data, allowing for rounding and units. The memo shows how many matched and
+  lists the rest with the sentence each came from. A match proves the figure was in
+  the source, not that it is attached to the right label; figures the model worked
+  out itself (a difference, a total) show up as unmatched for you to check.
+- For filing changes, a mechanical comparison finds the changed paragraphs first. The
+  model sees only those, and all of them are shown under its summary.
+
 ## Known limitations
+
+- **AI results are reused** until the company files new results (memo) or a new annual
+  report (filing changes), so they don't cost usage each time you open a company. Turn
+  off "Run AI analysis automatically" in the sidebar to stop them starting on their own.
+- **The fact-check can be fooled by coincidence.** A small round figure such as "5%" is
+  likely to match something in the data whether or not it is the right thing.
+- **The filing comparison works on paragraphs.** A paragraph that was moved and heavily
+  rewritten shows as one removed and one new.
+- **The backtest covers a short, unusual period and only today's large companies.** Its
+  page lists what that means for the result.
 
 - **US-listed companies only.** Any of the roughly 10,000 tickers on the SEC's list
   can be searched by ticker or name (`data/companies.json`, updated by the daily
