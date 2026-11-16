@@ -207,6 +207,42 @@ def sensitivity(base_revenue, net_debt, shares, a: Assumptions, step: float = 0.
     return table
 
 
+def scenarios(base_revenue, net_debt, shares, a: Assumptions) -> pd.DataFrame:
+    """Value per share in a pessimistic, central and optimistic case.
+
+    The bear and bull cases move the three assumptions that matter most, all
+    in the same direction at once:
+      * year-1 growth: down or up by 2 points, or 30% of itself if that is more
+      * operating margin: 15% lower or higher
+      * discount rate: 1 point higher or lower
+    The sizes are a rule of thumb, not a forecast. The point is to see how far
+    the answer moves when things go somewhat worse or better than the base case.
+    """
+    growth_shift = max(0.02, 0.30 * abs(a.growth_start))
+    margin_shift = 0.15 * abs(a.ebit_margin)
+    cases = {
+        "Bear": (-growth_shift, -margin_shift, +0.01),
+        "Base": (0.0, 0.0, 0.0),
+        "Bull": (+growth_shift, +margin_shift, -0.01),
+    }
+    rows = {}
+    for name, (growth, margin, wacc) in cases.items():
+        trial = Assumptions(**{
+            **a.to_dict(),
+            "growth_start": a.growth_start + growth,
+            "ebit_margin": a.ebit_margin + margin,
+            # Keep the discount rate clear of terminal growth so the maths still works.
+            "wacc": max(a.wacc + wacc, a.terminal_growth + 0.01),
+        })
+        try:
+            per_share = value(base_revenue, net_debt, shares, trial)["value_per_share"]
+        except ValueError:
+            per_share = float("nan")
+        rows[name] = {"growth_start": trial.growth_start, "ebit_margin": trial.ebit_margin,
+                      "wacc": trial.wacc, "value_per_share": per_share}
+    return pd.DataFrame(rows).T
+
+
 def implied_growth(base_revenue, net_debt, shares, a: Assumptions, price: float):
     """Reverse DCF: the starting growth rate at which the DCF value equals today's price.
 

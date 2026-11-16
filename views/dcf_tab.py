@@ -50,7 +50,8 @@ def render(data: dict):
 
     st.caption(
         "The starting values are mechanical: averages of the last three years, with growth "
-        "fading to the terminal rate. They are a baseline to argue with, not a forecast."
+        "fading to the terminal rate. They are a baseline to argue with, not a forecast. "
+        f"The forecast starts from revenue for the {data['latest']['label']}."
         + (" You are currently seeing your saved assumptions." if saved else "")
     )
 
@@ -120,7 +121,7 @@ def render(data: dict):
                     money(result["enterprise_value"]),
                     money(result["net_debt"]),
                     money(result["equity_value"]),
-                    f"{data['statements']['diluted_shares'].iloc[-1] / 1e9:,.2f}B",
+                    f"{report.dcf_inputs(data)[2] / 1e9:,.2f}B",
                     dollars(result["value_per_share"]),
                 ],
             }
@@ -146,6 +147,25 @@ def render(data: dict):
         st.dataframe(parts, hide_index=True, width="stretch")
         st.caption(f"Risk-free rate: {wacc_parts['risk_free_source']}. "
                    f"Beta: {wacc_parts['beta_source']}. The equity risk premium is an assumption.")
+
+    st.subheader("Bear, base and bull cases")
+    cases = result["scenarios"]
+    st.dataframe(
+        pd.DataFrame(
+            {
+                "Revenue growth, year 1": cases["growth_start"].map(percent),
+                "Operating margin": cases["ebit_margin"].map(percent),
+                "Discount rate": cases["wacc"].map(percent),
+                "Value per share": cases["value_per_share"].map(dollars),
+                "Against today's price": (cases["value_per_share"] / price - 1).map(signed_percent),
+            }
+        ).T,
+        width="stretch",
+    )
+    st.caption("Base is the assumptions above. Bear and bull move growth, margin and the "
+               "discount rate together: growth by 2 points (or 30% of itself if larger), margin "
+               "by 15%, and the discount rate by 1 point. A rule of thumb for how far the "
+               "answer moves, not a forecast of either outcome.")
 
     st.subheader("Forecast")
     forecast = result["forecast"]

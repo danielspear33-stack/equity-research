@@ -16,6 +16,8 @@ FLOW_TAGS = {
         "Revenues",
         "SalesRevenueNet",
         "RevenueFromContractWithCustomerIncludingAssessedTax",
+        # Banks and brokers report revenue after the interest they pay out.
+        "RevenuesNetOfInterestExpense",
     ],
     "cost_of_revenue": ["CostOfGoodsAndServicesSold", "CostOfRevenue"],
     "gross_profit": ["GrossProfit"],
@@ -51,6 +53,14 @@ FLOW_TAGS = {
         "WeightedAverageNumberOfSharesOutstandingBasic",
     ],
     "eps_diluted": ["EarningsPerShareDiluted"],
+    # Cash handed back to shareholders, and pay given to staff in shares.
+    "dividends_paid": ["PaymentsOfDividendsCommonStock", "PaymentsOfDividends"],
+    "buybacks": ["PaymentsForRepurchaseOfCommonStock"],
+    "dividends_per_share": [
+        "CommonStockDividendsPerShareDeclared",
+        "CommonStockDividendsPerShareCashPaid",
+    ],
+    "stock_comp": ["ShareBasedCompensation", "AllocatedShareBasedCompensationExpense"],
 }
 
 # Figures measured on a single day (balance sheet).
@@ -76,6 +86,12 @@ BALANCE_TAGS = {
     ],
     "short_term_borrowings": ["CommercialPaper", "ShortTermBorrowings", "NotesAndLoansPayable"],
     "debt_combined": ["LongTermDebt", "DebtLongtermAndShorttermCombinedAmount"],
+    # Assets you can't touch: the premium paid for past acquisitions, brands, patents.
+    "goodwill": ["Goodwill"],
+    "intangibles": ["IntangibleAssetsNetExcludingGoodwill", "FiniteLivedIntangibleAssetsNet"],
+    # Preferred shares rank ahead of ordinary shareholders, so they are taken
+    # out of equity when working out book value per ordinary share.
+    "preferred_equity": ["PreferredStockValue", "PreferredStockValueOutstanding"],
 }
 
 ANNUAL_FORMS = {"10-K", "10-K/A"}
@@ -133,7 +149,43 @@ def build_annual_statements(facts: dict, years: int = 10) -> pd.DataFrame:
     table = table.reindex(year_ends).tail(years)
     table.index = pd.to_datetime(table.index)
     table.index.name = "fiscal_year_end"
+    return adjust_for_splits(add_derived_lines(table))
 
+
+def adjust_for_splits(table: pd.DataFrame) -> pd.DataFrame:
+    """Put share counts from before a stock split on today's basis.
+
+    In a 20-for-1 split every share becomes twenty, so the count jumps
+    twentyfold overnight without anything real changing. Companies restate the
+    last couple of years in their next report but not older ones, which leaves
+    a false jump in the history. A share count that roughly doubles or more
+    (or halves or less) in one year is treated as a split, and every earlier
+    year is rescaled by the nearest whole ratio.
+    """
+    shares = table["diluted_shares"]
+    factor = pd.Series(1.0, index=table.index)
+    known = shares.dropna()
+    for earlier, later in zip(known.index[:-1], known.index[1:]):
+        ratio = known[later] / known[earlier]
+        if ratio >= 1.8:
+            split = round(ratio * 2) / 2          # 2, 3, 4 ... and 2.5 for a 5-for-2
+        elif ratio <= 0.55:
+            split = 1 / round(1 / ratio)          # a reverse split, e.g. 1-for-10
+        else:
+            continue
+        factor[table.index <= earlier] *= split
+    table["diluted_shares"] = shares * factor
+    for per_share in ("eps_diluted", "dividends_per_share"):
+        table[per_share] = table[per_share] / factor
+    return table
+
+
+def add_derived_lines(table: pd.DataFrame) -> pd.DataFrame:
+    """Fill in the lines that are worked out from others rather than reported.
+
+    Shared by the annual table and the trailing-twelve-month row, so both are
+    built the same way.
+    """
     # Gross profit isn't always tagged; it is revenue minus the cost of making the product.
     table["gross_profit"] = table["gross_profit"].fillna(
         table["revenue"] - table["cost_of_revenue"]

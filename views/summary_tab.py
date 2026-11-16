@@ -9,7 +9,7 @@ from research import comps
 from .formatting import dollars
 
 
-def build_ranges(data: dict, dcf_output, comps_result) -> pd.DataFrame:
+def build_ranges(data: dict, dcf_output, comps_result, bank_output=None) -> pd.DataFrame:
     """One row per method: the low, middle and high value per share."""
     rows = []
     history = data["price_history"]
@@ -22,8 +22,24 @@ def build_ranges(data: dict, dcf_output, comps_result) -> pd.DataFrame:
         grid = result["sensitivity"].stack().dropna()
         rows.append({"method": "DCF (sensitivity range)", "low": grid.min(),
                      "mid": result["value_per_share"], "high": grid.max()})
+        cases = result["scenarios"]["value_per_share"].dropna()
+        if len(cases) == 3:
+            rows.append({"method": "DCF (bear to bull case)", "low": cases["Bear"],
+                         "mid": cases["Base"], "high": cases["Bull"]})
+    if bank_output:
+        result = bank_output["result"]
+        grid = result["sensitivity"].stack().dropna()
+        rows.append({"method": "Justified price-to-book (sensitivity range)", "low": grid.min(),
+                     "mid": result["value_by_book"], "high": grid.max()})
+        rows.append({"method": "Dividend discount (dividends only to with buybacks)",
+                     "low": result["value_by_dividends"],
+                     "mid": (result["value_by_dividends"] + result["value_by_total_payout"]) / 2,
+                     "high": result["value_by_total_payout"]})
     if comps_result is not None and not comps_result["implied"].empty:
         for multiple, row in comps_result["implied"].iterrows():
+            # Enterprise-value multiples mean nothing for a bank or insurer.
+            if data["profile"]["is_financial"] and multiple != "price_to_earnings":
+                continue
             rows.append({"method": f"Peers: {comps.MULTIPLES[multiple]}",
                          "low": row["low"], "mid": row["median"], "high": row["high"]})
     ranges = pd.DataFrame(rows)
@@ -33,8 +49,8 @@ def build_ranges(data: dict, dcf_output, comps_result) -> pd.DataFrame:
     return ranges
 
 
-def render(data: dict, dcf_output, comps_result) -> None:
-    ranges = build_ranges(data, dcf_output, comps_result)
+def render(data: dict, dcf_output, comps_result, bank_output=None) -> None:
+    ranges = build_ranges(data, dcf_output, comps_result, bank_output)
     if ranges.empty or data["valuation"] is None:
         st.info("Not enough data to compare valuation methods.")
         return
@@ -72,5 +88,6 @@ def render(data: dict, dcf_output, comps_result) -> None:
         }
     )
     st.dataframe(shown, hide_index=True, width="stretch")
-    st.caption(f"Share price today: {dollars(price)}. DCF range is the spread across the "
-               "sensitivity table; peer ranges run from the 25th to the 75th percentile multiple.")
+    st.caption(f"Share price today: {dollars(price)}. Sensitivity ranges are the spread across "
+               "that method's sensitivity table; peer ranges run from the 25th to the 75th "
+               "percentile multiple.")

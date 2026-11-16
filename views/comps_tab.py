@@ -48,7 +48,7 @@ def render(data: dict, load_comps):
         return None
 
     # The company itself goes on the top row so it can be read against its peers.
-    v, m = data["valuation"], data["metrics"].iloc[-1]
+    v, m = data["valuation"], data["latest"]["metrics"]
     own = pd.DataFrame(
         {
             "name": data["profile"]["name"],

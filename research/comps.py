@@ -57,7 +57,7 @@ def build_peer_table(peer_tickers: list, run_report) -> tuple:
             if error or report["valuation"] is None:
                 errors[ticker] = error or report["price_error"] or "no price data"
                 continue
-            v, m = report["valuation"], report["metrics"].iloc[-1]
+            v, m = report["valuation"], report["latest"]["metrics"]
             rows[ticker] = {
                 "name": report["profile"]["name"],
                 "market_cap": v["market_cap"],

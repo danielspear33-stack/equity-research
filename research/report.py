@@ -2,7 +2,7 @@
 
 import pandas as pd
 
-from . import comps, dcf, edgar, market, metrics, prices, statements, store
+from . import comps, dcf, edgar, market, metrics, prices, quarterly, statements, store
 
 
 def run(ticker: str) -> dict:
@@ -10,7 +10,8 @@ def run(ticker: str) -> dict:
     ticker = ticker.strip().upper()
     cik = edgar.lookup_cik(ticker)
     profile = edgar.get_profile(cik)
-    annual = statements.build_annual_statements(edgar.get_company_facts(cik))
+    facts = edgar.get_company_facts(cik)
+    annual = statements.build_annual_statements(facts)
     if annual.empty:
         raise ValueError(
             f"{profile['name']} has no annual reports (10-K) in SEC data. "
@@ -18,11 +19,26 @@ def run(ticker: str) -> dict:
         )
     annual_metrics = metrics.compute_annual_metrics(annual)
 
+    # The most recent twelve months, which is newer than the last annual report
+    # for most of the year. Valuation and the DCF start from these.
+    latest = quarterly.build_latest(facts, annual)
+    latest["metrics"] = metrics.compute_latest_metrics(latest["statements"], annual)
+    if latest["is_ttm"]:
+        latest["metrics"]["revenue_growth"] = (
+            latest["revenue_growth"] if latest["revenue_growth"] is not None else float("nan")
+        )
+        latest["label"] = f"12 months to {latest['as_of']:%d %b %Y}"
+    else:
+        latest["label"] = f"fiscal year to {latest['as_of']:%d %b %Y}"
+
     # Prices come from an unofficial source, so a failure there shouldn't
     # stop us showing everything that comes from the filings.
     try:
         price_history = prices.get_price_history(ticker)
-        valuation = metrics.compute_valuation(annual, annual_metrics, float(price_history.iloc[-1]))
+        valuation = metrics.compute_valuation(
+            annual, annual_metrics, float(price_history.iloc[-1]),
+            latest["statements"], latest["metrics"],
+        )
         price_error = None
     except Exception as error:  # noqa: BLE001 - any failure means "no prices today"
         price_history, valuation, price_error = None, None, str(error)
@@ -33,6 +49,8 @@ def run(ticker: str) -> dict:
         "profile": profile,
         "statements": annual,
         "metrics": annual_metrics,
+        "latest": latest,
+        "quarters": quarterly.build_quarters(facts),
         "price_history": price_history,
         "valuation": valuation,
         "price_error": price_error,
@@ -42,7 +60,7 @@ def run(ticker: str) -> dict:
 
 def dcf_blocker(report: dict):
     """Why a DCF can't sensibly be run for this company, or None if it can."""
-    latest = report["statements"].iloc[-1]
+    latest = report["latest"]["statements"]
     if report["profile"]["is_financial"]:
         return (
             "A standard DCF doesn't work for banks, insurers and similar companies: debt is "
@@ -69,14 +87,20 @@ def dcf_defaults(report: dict) -> tuple:
     return assumptions, wacc_parts
 
 
+def dcf_inputs(report: dict) -> tuple:
+    """Where the DCF starts from: latest twelve months' revenue, net debt and share count."""
+    latest = report["latest"]
+    return (latest["statements"]["revenue"], latest["metrics"]["net_debt"],
+            latest["statements"]["diluted_shares"])
+
+
 def run_dcf(report: dict, assumptions: dcf.Assumptions) -> dict:
     """Value the company and add the sensitivity table and upside to today's price."""
-    base_revenue = report["statements"]["revenue"].iloc[-1]
-    net_debt = report["metrics"]["net_debt"].iloc[-1]
-    shares = report["statements"]["diluted_shares"].iloc[-1]
+    base_revenue, net_debt, shares = dcf_inputs(report)
 
     result = dcf.value(base_revenue, net_debt, shares, assumptions)
     result["sensitivity"] = dcf.sensitivity(base_revenue, net_debt, shares, assumptions)
+    result["scenarios"] = dcf.scenarios(base_revenue, net_debt, shares, assumptions)
     price = report["valuation"]["price"]
     result["upside"] = result["value_per_share"] / price - 1
     result["implied_growth"] = dcf.implied_growth(base_revenue, net_debt, shares, assumptions, price)
@@ -95,7 +119,8 @@ def run_comps(report: dict, peer_tickers: list) -> dict:
     table, errors = comps.build_peer_table(peer_tickers, run)
     summary = comps.summarise_multiples(table) if not table.empty else pd.DataFrame()
     implied = (
-        comps.implied_values(summary, report["statements"], report["metrics"])
+        comps.implied_values(summary, report["latest"]["statements"].to_frame().T,
+                             report["latest"]["metrics"].to_frame().T)
         if not summary.empty
         else pd.DataFrame()
     )

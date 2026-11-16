@@ -5,9 +5,10 @@ Run it with:  streamlit run app.py
 
 import streamlit as st
 
-from research import report, store
+from research import insiders, report, store
 from research.edgar import TickerNotFound
-from views import comps_tab, dcf_tab, memo_tab, overview, summary_tab, watchlist
+from views import (bank_tab, comps_tab, dcf_tab, memo_tab, overview, payouts_tab, quarterly_tab,
+                   summary_tab, watchlist)
 
 st.set_page_config(page_title="Equity Research", page_icon="📊", layout="wide")
 
@@ -20,6 +21,11 @@ def load(ticker: str) -> dict:
 @st.cache_data(ttl=3600, show_spinner=False)
 def load_comps(ticker: str, peers: tuple) -> dict:
     return report.run_comps(load(ticker), list(peers))
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def load_insiders(cik: int):
+    return insiders.get_trades(cik)
 
 
 def open_company(ticker: str) -> None:
@@ -59,7 +65,8 @@ if not ticker:
     st.header("Search a company to begin")
     st.write(
         "Type a US-listed company's ticker in the sidebar. The tool pulls its SEC filings and "
-        "share price, then runs the metrics, a DCF and a peer comparison."
+        "share price, then shows its latest results, a health check, a DCF (or a bank "
+        "valuation), a peer comparison, payouts to shareholders and insider trades."
     )
     st.stop()
 
@@ -85,32 +92,42 @@ elif follow.button("☆ Follow", type="primary", width="stretch"):
     st.rerun()
 
 st.caption(
-    f"{profile['industry']} · latest fiscal year ended {statements.index[-1]:%d %b %Y} · "
-    "source: SEC filings (annual reports) and Yahoo Finance prices"
+    f"{profile['industry']} · latest figures: {data['latest']['label']} · "
+    f"last annual report: fiscal year to {statements.index[-1]:%d %b %Y} · "
+    "source: SEC filings and Yahoo Finance prices"
 )
 if profile["is_financial"]:
     st.warning(
         "This is a financial company (bank, insurer or similar). Debt is its raw material "
         "rather than its funding, so margins, free cash flow, EV multiples and leverage "
-        "are not meaningful. Net income, return on equity and P/E still are."
+        "are not meaningful. It is valued on book value, return on equity and dividends "
+        "instead: see the Bank valuation tab."
     )
 if data["price_error"]:
     st.warning(f"Share price unavailable right now, so valuation is blank. ({data['price_error']})")
 
-tabs = st.tabs(["Overview", "DCF", "Comps", "Valuation summary", "AI memo"])
+is_financial = profile["is_financial"]
+tabs = st.tabs(["Overview", "Quarterly", "Bank valuation" if is_financial else "DCF", "Comps",
+                "Valuation summary", "Payouts & insiders", "AI memo"])
 with tabs[0]:
     overview.render(data)
 with tabs[1]:
-    dcf_output = dcf_tab.render(data)
+    quarterly_tab.render(data)
 with tabs[2]:
-    comps_result = comps_tab.render(data, load_comps)
+    # Banks and insurers get their own valuation; everyone else gets the DCF.
+    dcf_output = None if is_financial else dcf_tab.render(data)
+    bank_output = bank_tab.render(data) if is_financial else None
 with tabs[3]:
-    summary_tab.render(data, dcf_output, comps_result)
+    comps_result = comps_tab.render(data, load_comps)
 with tabs[4]:
-    memo_tab.render(data, dcf_output, comps_result)
+    summary_tab.render(data, dcf_output, comps_result, bank_output)
+with tabs[5]:
+    insider_summary = payouts_tab.render(data, load_insiders)
+with tabs[6]:
+    memo_tab.render(data, dcf_output, comps_result, bank_output, insider_summary)
 
 st.caption(
     "Figures are matched automatically from company filings, so some are approximations: "
-    "total debt mostly excludes leases, and market cap uses the latest fiscal year's "
-    "average diluted share count. Nothing here is investment advice."
+    "total debt mostly excludes leases, and market cap uses the average diluted share count "
+    "from the latest quarter or year reported. Nothing here is investment advice."
 )

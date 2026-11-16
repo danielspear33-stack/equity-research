@@ -5,7 +5,8 @@ import streamlit as st
 from research import config, edgar, filings, memo, store
 
 
-def _build_context(data, dcf_output, comps_result, include_report: bool) -> str:
+def _build_context(data, dcf_output, comps_result, include_report: bool, bank_output=None,
+                   insider_summary=None) -> str:
     sections = None
     if include_report:
         try:
@@ -17,13 +18,15 @@ def _build_context(data, dcf_output, comps_result, include_report: bool) -> str:
         except Exception as error:  # noqa: BLE001
             st.warning(f"Carrying on without the annual report. {error}")
     result, assumptions, wacc_parts, user_set = dcf_output or (None, None, None, False)
-    return memo.build_context(data, result, assumptions, wacc_parts, user_set, comps_result, sections)
+    extras = memo.build_extras(data, bank_output, insider_summary)
+    return memo.build_context(data, result, assumptions, wacc_parts, user_set, comps_result,
+                              sections, extras)
 
 
-def render(data: dict, dcf_output, comps_result) -> None:
+def render(data: dict, dcf_output, comps_result, bank_output=None, insider_summary=None) -> None:
     ticker = data["ticker"]
     st.caption(
-        "Gives Claude this page's numbers, plus the Business, Risk Factors and MD&A sections "
+        "Gives Claude everything on these tabs, plus the Business, Risk Factors and MD&A sections "
         "of the latest annual report, and asks for a one-page memo. It explains and questions "
         "the numbers; it does not make a buy or sell call."
     )
@@ -34,7 +37,8 @@ def render(data: dict, dcf_output, comps_result) -> None:
         if st.button("Write memo with Claude Code", type="primary", key=f"{ticker}_memo_cli",
                      help="Uses the Claude Code tool installed on this computer, which counts "
                           "against your Claude subscription's usage rather than charging per call."):
-            context = _build_context(data, dcf_output, comps_result, include_report)
+            context = _build_context(data, dcf_output, comps_result, include_report, bank_output,
+                                     insider_summary)
             try:
                 with st.spinner("Claude is writing the memo. This can take a minute or two…"):
                     store.save_memo(ticker, memo.write_with_claude_code(context))
@@ -49,7 +53,8 @@ def render(data: dict, dcf_output, comps_result) -> None:
         st.write("1. Prepare and download the prompt file. 2. Attach it to a new chat at "
                  "claude.ai and send it. 3. Paste the memo back here to keep it with the company.")
         if st.button("Prepare prompt file", key=f"{ticker}_prepare"):
-            context = _build_context(data, dcf_output, comps_result, include_report)
+            context = _build_context(data, dcf_output, comps_result, include_report, bank_output,
+                                     insider_summary)
             st.session_state[f"{ticker}_prompt"] = memo.prompt_for_chat(context)
         if f"{ticker}_prompt" in st.session_state:
             st.download_button("Download prompt file", st.session_state[f"{ticker}_prompt"],
@@ -64,7 +69,8 @@ def render(data: dict, dcf_output, comps_result) -> None:
             st.caption(f"Uses your API key and the model {config.MEMO_MODEL}. "
                        "This is billed per call, separately from a Claude subscription.")
             if st.button("Write memo with the API", key=f"{ticker}_memo_api"):
-                context = _build_context(data, dcf_output, comps_result, include_report)
+                context = _build_context(data, dcf_output, comps_result, include_report, bank_output,
+                                     insider_summary)
                 try:
                     store.save_memo(ticker, st.write_stream(memo.stream_memo(context)))
                     st.rerun()

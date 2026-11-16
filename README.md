@@ -3,12 +3,20 @@
 Type a US-listed company's ticker and get a full valuation workup built from the
 company's own SEC filings and its share price:
 
-- **Overview**: ten years of financial statements, margins, returns, leverage and
-  today's valuation multiples.
+- **Overview**: today's valuation, results for the latest twelve months, a health
+  check (rule-of-thumb questions answered from the numbers), how the share price has
+  behaved against the S&P 500, and ten years of financial statements.
+- **Quarterly**: the last eight quarters, growth against a year earlier, and the
+  latest twelve months against the last annual report.
 - **DCF**: a discounted cash flow model with editable assumptions, a WACC build-up,
-  a sensitivity table and a reverse DCF (the growth today's price implies).
+  a sensitivity table, bear/base/bull cases and a reverse DCF (the growth today's
+  price implies).
+- **Bank valuation** (shown instead of the DCF for banks, insurers and brokers): book
+  value, return on equity, a justified price-to-book value and a dividend discount model.
 - **Comps**: peer multiples and the share value they imply, with editable peers.
 - **Valuation summary**: every method on one "football field" chart against the price.
+- **Payouts & insiders**: dividends, buybacks, the share count, pay in shares, and
+  what directors and executives have been buying and selling.
 - **AI memo**: Claude reads the numbers and the annual report and writes a one-page
   briefing. It explains and questions; it does not make a buy or sell call. It runs
   on your Claude subscription, with no per-use charge.
@@ -46,9 +54,9 @@ Environment variables you set before starting the app.
 
 The memo tab offers two routes that use a Claude subscription:
 
-1. **Claude Code** (one click): install Claude Code and sign in with your Claude
-   account. The app then asks it to write the memo, which counts against your
-   subscription's usage limits.
+1. **Claude Code** (one click): install the Claude Code command-line tool, then sign
+   in once by running `claude auth login` in a terminal. The app then asks it to
+   write the memo, which counts against your subscription's usage limits.
 2. **claude.ai** (by hand): download the prepared prompt file, attach it to a chat
    at claude.ai, and paste the memo back into the app.
 
@@ -74,10 +82,16 @@ watchlist marks filings from the last week as new.
 | --- | --- |
 | `research/edgar.py` | Turns a ticker into the SEC's company ID; downloads filing data and the list of recent filings |
 | `research/statements.py` | Picks the annual figures out of the raw filing data into one table |
+| `research/quarterly.py` | Single quarters and the trailing twelve months, from quarterly reports |
 | `research/metrics.py` | Margins, growth, returns, leverage and valuation multiples |
+| `research/checks.py` | The health check |
+| `research/pricestats.py` | Returns, 52-week range, moving averages, volatility |
 | `research/prices.py` | Five years of daily share prices |
 | `research/market.py` | Risk-free rate and beta, for the discount rate |
-| `research/dcf.py` | The DCF: forecast, WACC, terminal value, sensitivity, reverse DCF |
+| `research/dcf.py` | The DCF: forecast, WACC, terminal value, sensitivity, scenarios, reverse DCF |
+| `research/financials.py` | Valuation for banks, insurers and brokers |
+| `research/payouts.py` | Dividends, buybacks, share count and stock-based pay |
+| `research/insiders.py` | Insider trades from SEC Form 4 filings |
 | `research/comps.py` | Peer suggestions, peer multiples and implied values |
 | `research/filings.py` | Downloads the annual report and extracts the key sections |
 | `research/memo.py` | Builds the prompt and calls Claude for the memo |
@@ -105,15 +119,26 @@ These are judgement calls, set in `research/config.py`:
 
 - **US filers only.** Companies that don't file annual 10-K reports (most foreign
   and Canada-only listings) are not supported.
-- **Banks and insurers** are flagged: no DCF is run and most metrics don't apply.
-- **Annual figures only.** Multiples use the latest full fiscal year, not the
-  trailing twelve months, so they lag for fast-changing companies.
+- **Banks and insurers** get a simpler valuation (price-to-book and dividends) in
+  place of the DCF. It ignores things specialists look at, such as capital ratios
+  and loan losses.
+- **Trailing twelve months are pieced together** from quarterly reports by
+  subtraction. If a company's quarters can't be matched up, the latest fiscal year
+  is used instead and the page says so.
+- **No analyst estimates or earnings dates.** There is no free, reliable source for
+  them, so everything here is reported history plus your own assumptions.
+- **Insider trades cover the latest 40 filings**, which for a large company is a few
+  months. Routine awards and tax withholding are listed separately from open-market
+  trades.
+- **Bear and bull cases use fixed rule-of-thumb shifts**, not a view on the company.
 - **Total debt is approximate.** Companies label debt inconsistently, and lease
   obligations are mostly excluded.
 - **Operating income and D&A are rebuilt** from other lines when a company doesn't
   report them directly, so EBITDA can be approximate.
-- **Market cap uses the latest fiscal year's average diluted share count**, so it
-  drifts after buybacks and is wrong after a stock split until the next annual report.
+- **Market cap uses the average diluted share count from the latest quarter or
+  year reported**, so it drifts slightly after buybacks and is wrong after a stock
+  split until the next report. Older share counts are rescaled for splits by rule
+  of thumb (a count that doubles or more in a year is treated as a split).
 - **Stock-based compensation is not deducted** from free cash flow, which flatters
   companies that pay staff heavily in shares.
 - **Peer suggestions are a hand-picked list** covering the built-in tickers. For any

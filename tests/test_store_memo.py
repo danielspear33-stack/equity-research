@@ -114,7 +114,7 @@ def test_claude_code_route_sends_data_on_stdin_and_hides_api_key(monkeypatch):
     monkeypatch.setenv("ANTHROPIC_API_KEY", "would-be-billed")
     monkeypatch.setattr(memo.subprocess, "run", fake_run)
     assert memo.write_with_claude_code("numbers") == "The memo."
-    assert seen["command"][:2] == ["claude", "-p"]
+    assert seen["command"][0].endswith("claude") and seen["command"][1] == "-p"
     assert seen["input"] == "numbers"
     assert "ANTHROPIC_API_KEY" not in seen["env"]
 

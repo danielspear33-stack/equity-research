@@ -48,9 +48,30 @@ def compute_annual_metrics(s: pd.DataFrame) -> pd.DataFrame:
     return m
 
 
-def compute_valuation(s: pd.DataFrame, m: pd.DataFrame, price: float) -> dict:
-    """Valuation multiples: today's price against the latest fiscal year's results."""
-    latest_s, latest_m = s.iloc[-1], m.iloc[-1]
+def compute_latest_metrics(latest_s: pd.Series, annual: pd.DataFrame) -> pd.Series:
+    """The same metrics for the trailing twelve months.
+
+    The latest row is put after the annual rows it follows, so that "average
+    over the year" figures use the last year-end balance sheet as the opening
+    position. Growth is left out: it is worked out separately against the
+    twelve months before.
+    """
+    if latest_s.name in annual.index:
+        return compute_annual_metrics(annual).iloc[-1]
+    table = pd.concat([annual, latest_s.to_frame().T.astype("float64")])
+    latest_m = compute_annual_metrics(table).iloc[-1].copy()
+    latest_m["revenue_growth"] = float("nan")
+    return latest_m
+
+
+def compute_valuation(s: pd.DataFrame, m: pd.DataFrame, price: float,
+                      latest_s: pd.Series = None, latest_m: pd.Series = None) -> dict:
+    """Valuation multiples: today's price against the most recent year of results.
+
+    That is the trailing twelve months when given, otherwise the latest fiscal year.
+    """
+    if latest_s is None:
+        latest_s, latest_m = s.iloc[-1], m.iloc[-1]
 
     # Market cap: what all the shares are worth at today's price.
     market_cap = price * latest_s["diluted_shares"]
@@ -72,4 +93,6 @@ def compute_valuation(s: pd.DataFrame, m: pd.DataFrame, price: float) -> dict:
         "ev_to_ebitda": ratio(enterprise_value, latest_m["ebitda"]),
         "ev_to_sales": ratio(enterprise_value, latest_s["revenue"]),
         "fcf_yield": ratio(latest_m["free_cash_flow"], market_cap),
+        "price_to_book": ratio(market_cap, latest_s.get("equity")),
+        "dividend_yield": ratio(latest_s.get("dividends_paid"), market_cap),
     }
