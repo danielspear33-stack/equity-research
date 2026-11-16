@@ -34,11 +34,29 @@ def open_company(ticker: str) -> None:
     st.session_state["page"] = "company"
 
 
-def open_picked_company() -> None:
-    """Opens the company chosen in the start page's search box."""
-    picked = st.session_state.get("start_search")
-    if picked is not None:
-        open_company(edgar.company_list()[picked][0])
+def company_search(key: str, label: str, show_label: bool = True) -> None:
+    """A search box over every US-listed company.
+
+    Suggestions narrow as you type a name or a ticker, biggest companies
+    first. Picking one shows its ticker in the box and opens the company.
+    """
+    companies = edgar.company_list()
+
+    def open_picked() -> None:
+        picked = st.session_state.get(key)
+        if picked is not None:
+            open_company(companies[picked][0])
+
+    st.selectbox(
+        label, range(len(companies)), index=None, key=key,
+        format_func=lambda i: f"{companies[i][0]} · {companies[i][2]}",
+        placeholder="Type a name, e.g. Microsoft",
+        label_visibility="visible" if show_label else "collapsed",
+        # Plain "contains what you typed", in the list's own order, so the
+        # biggest companies come first: "m" leads with Microsoft.
+        filter_mode="contains",
+        on_change=open_picked,
+    )
 
 
 # A link like ?ticker=AAPL opens that company directly.
@@ -48,8 +66,9 @@ if "page" not in st.session_state:
 
 with st.sidebar:
     st.title("Equity Research")
+    company_search("sidebar_search", "Find a company by name")
     with st.form("search", border=False):
-        typed = st.text_input("Ticker", placeholder="e.g. AAPL", max_chars=10)
+        typed = st.text_input("Or type a ticker", placeholder="e.g. AAPL", max_chars=10)
         if st.form_submit_button("Analyse", type="primary", width="stretch") and typed.strip():
             open_company(typed)
 
@@ -70,16 +89,10 @@ if st.session_state["page"] == "watchlist":
 
 ticker = st.session_state.get("ticker", "")
 if not ticker:
-    companies = edgar.company_list()
     st.header("Search a company")
-    st.selectbox(
-        "Company", range(len(companies)), index=None, key="start_search",
-        format_func=lambda i: f"{companies[i][0]} · {companies[i][2]}",
-        placeholder="Type a ticker or a company name", label_visibility="collapsed",
-        on_change=open_picked_company,
-    )
+    company_search("start_search", "Company", show_label=False)
     st.caption(
-        f"Covers every company with shares listed in the US: {len(companies):,} tickers, from "
+        f"Covers every company with shares listed in the US: {len(edgar.company_list()):,} tickers, from "
         "the SEC's own list. The tool pulls the company's filings and share price, then shows "
         "its latest results, a health check, a DCF (or a bank valuation), a peer comparison, "
         "payouts to shareholders and insider trades."
