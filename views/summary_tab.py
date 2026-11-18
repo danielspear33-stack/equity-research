@@ -10,7 +10,7 @@ from . import style
 from .formatting import dollars
 
 
-def build_ranges(data: dict, dcf_output, comps_result, bank_output=None) -> pd.DataFrame:
+def build_ranges(data: dict, dcf_output, comps_result, bank_output=None, lbo_output=None) -> pd.DataFrame:
     """One row per method: the low, middle and high value per share."""
     rows = []
     history = data["price_history"]
@@ -43,6 +43,12 @@ def build_ranges(data: dict, dcf_output, comps_result, bank_output=None) -> pd.D
                 continue
             rows.append({"method": f"Peers: {comps.MULTIPLES[multiple]}",
                          "low": row["low"], "mid": row["median"], "high": row["high"]})
+    if lbo_output:
+        prices = lbo_output["prices"]
+        # Low to high is the buyer wanting five points more, to five points less,
+        # than the target return set on the LBO tab.
+        rows.append({"method": "LBO: what a buyout firm could pay",
+                     "low": prices["low"], "mid": prices["mid"], "high": prices["high"]})
     ranges = pd.DataFrame(rows)
     if not ranges.empty:
         # A negative value per share just means "worth nothing" on that method.
@@ -50,8 +56,8 @@ def build_ranges(data: dict, dcf_output, comps_result, bank_output=None) -> pd.D
     return ranges
 
 
-def render(data: dict, dcf_output, comps_result, bank_output=None) -> None:
-    ranges = build_ranges(data, dcf_output, comps_result, bank_output)
+def render(data: dict, dcf_output, comps_result, bank_output=None, lbo_output=None) -> None:
+    ranges = build_ranges(data, dcf_output, comps_result, bank_output, lbo_output)
     if ranges.empty or data["valuation"] is None:
         st.info("Not enough data to compare valuation methods.")
         return
@@ -64,7 +70,7 @@ def render(data: dict, dcf_output, comps_result, bank_output=None) -> None:
         "where the thinking needs to happen."
     )
     order = ranges["method"].tolist()
-    base = alt.Chart(ranges).encode(y=alt.Y("method:N", sort=order, title=None, axis=alt.Axis(labelLimit=260)))
+    base = alt.Chart(ranges).encode(y=alt.Y("method:N", sort=order, title=None, axis=alt.Axis(labelLimit=330)))
     bars = base.mark_bar(height=22, color=style.GOLD, opacity=0.55, cornerRadius=4).encode(
         x=alt.X("low:Q", title="Value per share ($)", scale=alt.Scale(zero=False)),
         x2="high:Q",

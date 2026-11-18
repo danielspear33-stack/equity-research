@@ -4,6 +4,7 @@ First run: creates a private Python environment in this folder and installs the
 libraries (a few minutes). Every run: starts the app and opens it in your browser.
 """
 
+import shutil
 import socket
 import subprocess
 import sys
@@ -21,6 +22,25 @@ def environment_python() -> Path:
     if sys.platform == "win32":
         return ENVIRONMENT / "Scripts" / "python.exe"
     return ENVIRONMENT / "bin" / "python"
+
+
+def update_from_github() -> None:
+    """Fetch the newest version of the app before starting, if there is one.
+
+    Only ever moves forward to what is on GitHub. If that can't be done
+    cleanly (no internet, or files changed here that also changed there) it
+    leaves everything as it is and starts the version already on this computer.
+    """
+    if not (FOLDER / ".git").exists() or shutil.which("git") is None:
+        return
+    try:
+        result = subprocess.run(["git", "pull", "--ff-only", "--quiet"], cwd=FOLDER,
+                                capture_output=True, text=True, timeout=60)
+    except (subprocess.TimeoutExpired, OSError):
+        return
+    if result.returncode != 0:
+        print("Couldn't fetch the newest version automatically, so starting the one already "
+              "here. To update, ask Claude Code to \"pull the latest version\".", flush=True)
 
 
 def install_if_needed() -> None:
@@ -53,6 +73,7 @@ def is_listening(port: int) -> bool:
 
 
 def main() -> int:
+    update_from_github()
     install_if_needed()
     port = free_port()
     app = subprocess.Popen(

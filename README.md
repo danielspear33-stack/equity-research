@@ -65,6 +65,10 @@ bank-specific valuation where a DCF doesn't apply, and a plain-English health ch
 - **Bank valuation** (shown instead of the DCF for banks, insurers and brokers): book
   value, return on equity, a justified price-to-book value and a dividend discount model.
 - **Comps**: peer multiples and the share value they imply, with editable peers.
+- **LBO**: a leveraged buyout model. What a private equity buyer could pay and still
+  earn its target return, how the purchase is funded, how the debt is paid down, and
+  where the buyer's gain comes from (profit growth, a change in multiple, debt
+  repaid). Used here as a floor-price check on the other valuations.
 - **Valuation summary**: every method on one "football field" chart against the price.
 - **Payouts & insiders**: dividends, buybacks, the share count, pay in shares, and
   what directors and executives have been buying and selling.
@@ -81,6 +85,9 @@ bank-specific valuation where a DCF doesn't apply, and a plain-English health ch
 - **Watchlist**: follow companies and get a snapshot of each one every weekday.
 - **Screener** (in the sidebar): about 110 large companies and your watchlist ranked
   on five scores; click a row to open the company.
+- **Merger model** (in the sidebar): pick a buyer and a target, set the premium and
+  the mix of cash and shares, and see whether the deal raises or lowers the buyer's
+  earnings per share, why, and the synergies it needs to break even.
 - **Backtest** (in the sidebar): which of the tool's measures would have pointed the
   right way in past years, with the test's limitations spelled out.
 
@@ -91,7 +98,7 @@ the DCF and peer values, and the health check as coloured dots.
 
 The tabs are in two colour-coded groups. Blue tabs (Overview, Quarterly, Payouts &
 insiders) are market data of the kind any finance site shows. Gold tabs (DCF or
-Bank valuation, Comps, Valuation summary, AI analysis) are this tool's own analysis.
+Bank valuation, Comps, LBO, Valuation summary, AI analysis) are this tool's own analysis.
 The colours and the rest of the look are set in `.streamlit/config.toml` and
 `views/style.py`.
 
@@ -106,7 +113,8 @@ Double-click the launcher for your system:
 
 The first run sets up a private Python environment in this folder and installs the
 libraries, which takes a few minutes. After that it starts the app and opens it in
-your browser. Keep the launcher's window open while you use the app.
+your browser. Keep the launcher's window open while you use the app. Each time it starts, the launcher first
+fetches the newest version of the app from GitHub, if there is one.
 
 For a Desktop icon, make a shortcut (Windows) or alias (Mac) to the launcher and
 move that to the Desktop. The launcher itself has to stay in this folder.
@@ -175,6 +183,8 @@ watchlist marks filings from the last week as new.
 | `research/prices.py` | Five years of daily share prices |
 | `research/market.py` | Risk-free rate and beta, for the discount rate |
 | `research/dcf.py` | The DCF: forecast, WACC, terminal value, sensitivity, scenarios, reverse DCF |
+| `research/lbo.py` | The LBO: entry, debt paydown, exit, returns, and the price a buyer could pay |
+| `research/merger.py` | The merger model: change in earnings per share and break-even synergies |
 | `research/financials.py` | Valuation for banks, insurers and brokers |
 | `research/payouts.py` | Dividends, buybacks, share count and stock-based pay |
 | `research/insiders.py` | Insider trades from SEC Form 4 filings |
@@ -223,6 +233,15 @@ These are judgement calls, set in `research/config.py`:
 
 ## Known limitations
 
+- **The LBO is simplified.** It treats the buyout debt as one loan at one rate, charges
+  interest on the opening balance, uses every spare dollar to repay debt, and sells at
+  the multiple paid unless you change it. Real buyouts layer several kinds of debt and
+  plan operating improvements. For companies far larger than any buyout ever done it
+  shows the mechanics, not a deal that could happen.
+- **The merger model uses last-twelve-month earnings**, not forecasts, and leaves out
+  deal fees, interest lost on the buyer's own cash and the accounting charge for
+  acquired intangible assets. It says whether a deal adds to earnings per share, which
+  is not the same as whether it creates value.
 - **AI results are reused** until the company files new results (memo) or a new annual
   report (filing changes), so they don't cost usage each time you open a company. Turn
   off "Run AI analysis automatically" in the sidebar to stop them starting on their own.

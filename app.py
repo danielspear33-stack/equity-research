@@ -8,8 +8,8 @@ import streamlit as st
 from research import edgar, insiders, report, store
 from research.edgar import TickerNotFound
 from views import (backtest_page, bank_tab, changes_tab, comps_tab, dcf_tab, earnings_tab, glance,
-                   memo_tab, overview, payouts_tab, quarterly_tab, screener_page, style, summary_tab,
-                   watchlist)
+                   lbo_tab, memo_tab, merger_page, overview, payouts_tab, quarterly_tab, screener_page,
+                   style, summary_tab, watchlist)
 
 st.set_page_config(page_title="Equity Research", page_icon="📊", layout="wide")
 style.apply()
@@ -61,8 +61,10 @@ def company_search(key: str, label: str, show_label: bool = True) -> None:
 
 
 # A link like ?ticker=AAPL opens that company directly.
+# ?page=merger&buyer=MSFT&target=ADBE opens the merger model on that pair.
 if "page" not in st.session_state:
-    st.session_state["page"] = "company"
+    asked = st.query_params.get("page", "company")
+    st.session_state["page"] = asked if asked in ("company", "merger", "screener", "backtest") else "company"
     st.session_state["ticker"] = st.query_params.get("ticker", "").upper()
 
 with st.sidebar:
@@ -88,6 +90,9 @@ with st.sidebar:
     if st.button("Screener", width="stretch",
                  help="About 110 large companies and your watchlist, scored side by side."):
         st.session_state["page"] = "screener"
+    if st.button("Merger model", width="stretch",
+                 help="Pick a buyer and a target and see what the deal does to earnings per share."):
+        st.session_state["page"] = "merger"
     if st.button("Backtest", width="stretch",
                  help="Which of this tool's measures would have pointed you the right way in the past?"):
         st.session_state["page"] = "backtest"
@@ -107,6 +112,10 @@ if st.session_state["page"] == "watchlist":
     st.stop()
 if st.session_state["page"] == "backtest":
     backtest_page.render()
+    st.stop()
+if st.session_state["page"] == "merger":
+    merger_page.render(load, {"buyer": st.query_params.get("buyer", "").upper(),
+                              "target": st.query_params.get("target", "").upper()})
     st.stop()
 if st.session_state["page"] == "screener":
     screener_page.render(open_company)
@@ -169,9 +178,9 @@ at_a_glance = st.container()
 # Market data first, then this tool's own analysis (style.MARKET_DATA_TABS
 # says where the split is, and colours the second group gold).
 style.legend()
-(overview_tab, quarterly, payouts, valuation, peers, summary, ai_analysis) = st.tabs(
+(overview_tab, quarterly, payouts, valuation, peers, buyout, summary, ai_analysis) = st.tabs(
     ["Overview", "Quarterly", "Payouts & insiders",
-     "Bank valuation" if is_financial else "DCF", "Comps", "Valuation summary", "AI analysis"])
+     "Bank valuation" if is_financial else "DCF", "Comps", "LBO", "Valuation summary", "AI analysis"])
 
 with overview_tab:
     overview.render(data)
@@ -185,8 +194,10 @@ with valuation:
     bank_output = bank_tab.render(data) if is_financial else None
 with peers:
     comps_result = comps_tab.render(data, load_comps)
+with buyout:
+    lbo_output = lbo_tab.render(data, dcf_output)
 with summary:
-    summary_tab.render(data, dcf_output, comps_result, bank_output)
+    summary_tab.render(data, dcf_output, comps_result, bank_output, lbo_output)
 with ai_analysis:
     # All three are drawn every time, so each can start its own background work
     # as soon as the company is opened.
