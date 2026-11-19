@@ -249,3 +249,32 @@ def test_stale_copy_is_used_when_the_download_fails(monkeypatch, tmp_path):
     import pytest
     with pytest.raises(requests.ConnectionError):
         cache.fetch_json("https://example.com/y", "prices_Y", max_age=60)
+
+
+def test_filings_from_before_a_reorganisation_are_joined_on(monkeypatch, tmp_path):
+    import json
+    from research import config, edgar
+
+    def row(end, val, form):
+        return {"start": end[:4] + "-01-01", "end": end, "val": val, "form": form, "filed": end}
+
+    downloads = {
+        # The new registration has only this year's quarterly report...
+        "facts_2": {"facts": {"us-gaap": {"Revenues": {"units": {"USD": [row("2026-03-31", 30, "10-Q")]}}}}},
+        # ...and the history is under the old one.
+        "facts_1": {"facts": {"us-gaap": {
+            "Revenues": {"units": {"USD": [row("2025-12-31", 100, "10-K")]}},
+            "NetIncomeLoss": {"units": {"USD": [row("2025-12-31", 9, "10-K")]}},
+        }}},
+    }
+    listing = tmp_path / "predecessors.json"
+    listing.write_text(json.dumps({"2": [1]}))
+    monkeypatch.setattr(config, "PREDECESSORS_FILE", listing)
+    monkeypatch.setattr(edgar, "fetch_json", lambda url, name, age: downloads[name])
+
+    joined = edgar.get_company_facts(2)["facts"]["us-gaap"]
+    assert [r["val"] for r in joined["Revenues"]["units"]["USD"]] == [100, 30]
+    assert joined["NetIncomeLoss"]["units"]["USD"][0]["val"] == 9
+    # The saved download itself is left as it was, and unlisted companies are untouched.
+    assert len(downloads["facts_2"]["facts"]["us-gaap"]["Revenues"]["units"]["USD"]) == 1
+    assert edgar.get_company_facts(1) is downloads["facts_1"]

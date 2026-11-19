@@ -16,7 +16,7 @@ from datetime import date
 
 import pandas as pd
 
-from .statements import BALANCE_TAGS, FLOW_TAGS, add_derived_lines
+from .statements import BALANCE_TAGS, FLOW_TAGS, add_derived_lines, merge_tags
 
 FORMS = {"10-K", "10-K/A", "10-Q", "10-Q/A"}
 
@@ -28,48 +28,46 @@ def _days(start: str, end: str) -> int:
     return (date.fromisoformat(end) - date.fromisoformat(start)).days
 
 
-def _periods(facts: dict, tags: list) -> dict:
-    """{(start, end): value} for the first tag that has each period.
+def _tag_periods(facts: dict, tag: str) -> dict:
+    """{(start, end): value} for one tag.
 
     The same period is repeated in later filings as a comparison, so the most
     recently filed value is kept.
     """
-    merged = {}
-    for tag in tags:
-        entry = facts.get("facts", {}).get("us-gaap", {}).get(tag)
-        if not entry:
-            continue
-        latest = {}
-        for rows in entry["units"].values():
-            for row in rows:
-                if row.get("form") not in FORMS or "start" not in row:
-                    continue
-                key = (row["start"], row["end"])
-                if key not in latest or row["filed"] > latest[key][0]:
-                    latest[key] = (row["filed"], row["val"])
-        for key, (_, value) in latest.items():
-            merged.setdefault(key, value)
-    return merged
+    entry = facts.get("facts", {}).get("us-gaap", {}).get(tag)
+    latest = {}
+    for rows in (entry["units"].values() if entry else []):
+        for row in rows:
+            if row.get("form") not in FORMS or "start" not in row:
+                continue
+            key = (row["start"], row["end"])
+            if key not in latest or row["filed"] > latest[key][0]:
+                latest[key] = (row["filed"], row["val"])
+    return {key: value for key, (_, value) in latest.items()}
+
+
+def _tag_balances(facts: dict, tag: str) -> dict:
+    """{date: value} for one balance sheet tag, which is measured on a single day."""
+    entry = facts.get("facts", {}).get("us-gaap", {}).get(tag)
+    latest = {}
+    for rows in (entry["units"].values() if entry else []):
+        for row in rows:
+            if row.get("form") not in FORMS or "start" in row:
+                continue
+            end = row["end"]
+            if end not in latest or row["filed"] > latest[end][0]:
+                latest[end] = (row["filed"], row["val"])
+    return {end: value for end, (_, value) in latest.items()}
+
+
+def _periods(facts: dict, tags: list) -> dict:
+    """{(start, end): value} for a line, from whichever candidate tags the company uses."""
+    return merge_tags(tags, lambda tag: _tag_periods(facts, tag))
 
 
 def _balances(facts: dict, tags: list) -> dict:
-    """{date: value} for balance sheet figures, which are measured on one day."""
-    merged = {}
-    for tag in tags:
-        entry = facts.get("facts", {}).get("us-gaap", {}).get(tag)
-        if not entry:
-            continue
-        latest = {}
-        for rows in entry["units"].values():
-            for row in rows:
-                if row.get("form") not in FORMS or "start" in row:
-                    continue
-                end = row["end"]
-                if end not in latest or row["filed"] > latest[end][0]:
-                    latest[end] = (row["filed"], row["val"])
-        for end, (_, value) in latest.items():
-            merged.setdefault(end, value)
-    return merged
+    """{date: value} for a balance sheet line."""
+    return merge_tags(tags, lambda tag: _tag_balances(facts, tag))
 
 
 def single_quarters(periods: dict, additive: bool = True) -> dict:

@@ -86,8 +86,29 @@ def get_profile(cik: int) -> dict:
 
 
 def get_company_facts(cik: int) -> dict:
-    """Every tagged number from the company's filings (a large download)."""
-    return fetch_json(FACTS_URL.format(cik=cik), f"facts_{cik}", config.FILINGS_MAX_AGE)
+    """Every tagged number from the company's filings (a large download).
+
+    When a company reorganises under a new holding company it gets a new SEC
+    registration, and its ticker moves to that while its history stays filed
+    under the old one (Exxon did this in 2026). For the companies listed in
+    data/predecessors.json the earlier filings are joined on, so the history
+    is whole.
+    """
+    facts = fetch_json(FACTS_URL.format(cik=cik), f"facts_{cik}", config.FILINGS_MAX_AGE)
+    earlier = json.loads(config.PREDECESSORS_FILE.read_text()).get(str(cik), [])
+    if not earlier:
+        return facts
+    joined = json.loads(json.dumps(facts))   # a copy, so the saved download isn't altered
+    for old_cik in earlier:
+        old = fetch_json(FACTS_URL.format(cik=old_cik), f"facts_{old_cik}", config.FILINGS_MAX_AGE)
+        for group, tags in old.get("facts", {}).items():
+            for tag, entry in tags.items():
+                target = joined.setdefault("facts", {}).setdefault(group, {}).setdefault(
+                    tag, {**entry, "units": {}})
+                for unit, rows in entry["units"].items():
+                    target["units"].setdefault(unit, [])
+                    target["units"][unit] = rows + target["units"][unit]
+    return joined
 
 
 def get_recent_filings(cik: int, forms=("10-K", "10-Q", "8-K"), limit: int = 10) -> list:

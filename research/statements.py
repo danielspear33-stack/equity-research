@@ -12,14 +12,16 @@ import pandas as pd
 # Figures measured over a full year (income statement and cash flow statement).
 FLOW_TAGS = {
     "revenue": [
-        "RevenueFromContractWithCustomerExcludingAssessedTax",
-        "Revenues",
-        "SalesRevenueNet",
+        # Tags in brackets are alternatives for the same line where one can be
+        # a part of another, so the largest is the total. Pfizer, for example,
+        # tags its product sales and its total revenue, and only the second
+        # includes income from partnerships.
+        ("RevenueFromContractWithCustomerExcludingAssessedTax", "Revenues", "SalesRevenueNet"),
         "RevenueFromContractWithCustomerIncludingAssessedTax",
         # Banks and brokers report revenue after the interest they pay out.
         "RevenuesNetOfInterestExpense",
     ],
-    "cost_of_revenue": ["CostOfGoodsAndServicesSold", "CostOfRevenue"],
+    "cost_of_revenue": [("CostOfGoodsAndServicesSold", "CostOfRevenue")],
     "gross_profit": ["GrossProfit"],
     "operating_income": ["OperatingIncomeLoss"],
     "pretax_income": [
@@ -68,20 +70,24 @@ BALANCE_TAGS = {
     "total_assets": ["Assets"],
     "current_assets": ["AssetsCurrent"],
     "current_liabilities": ["LiabilitiesCurrent"],
-    "equity": [
-        "StockholdersEquity",
-        "StockholdersEquityIncludingPortionAttributableToNoncontrollingInterest",
-    ],
+    "equity": ["StockholdersEquity"],
+    # Used only when the company doesn't tag its own shareholders' equity:
+    # the total including outside owners of subsidiaries, and their part of it.
+    "equity_with_minorities": ["StockholdersEquityIncludingPortionAttributableToNoncontrollingInterest"],
+    "minority_interest": ["MinorityInterest"],
+    # The total from the debt note in the accounts. Not used as the debt figure
+    # (it can cover only some of the borrowings), only to settle an ambiguity below.
+    "debt_per_note": ["DebtInstrumentCarryingAmount"],
     "cash": ["CashAndCashEquivalentsAtCarryingValue"],
-    "short_term_investments": [
-        "MarketableSecuritiesCurrent",
-        "ShortTermInvestments",
-        "AvailableForSaleSecuritiesDebtSecuritiesCurrent",
-    ],
-    "debt_noncurrent": ["LongTermDebtNoncurrent", "LongTermDebtAndCapitalLeaseObligations"],
+    # Cash-like holdings sit on up to two separate balance sheet lines.
+    "short_term_investments": ["ShortTermInvestments", "OtherShortTermInvestments"],
+    "marketable_securities": ["MarketableSecuritiesCurrent", "MarketableSecurities"],
+    # A breakdown of the lines above, used only when neither of them is tagged.
+    "securities_for_sale": ["AvailableForSaleSecuritiesDebtSecuritiesCurrent"],
+    "debt_noncurrent": [("LongTermDebtNoncurrent", "LongTermDebtAndCapitalLeaseObligations")],
     "debt_current": [
-        "LongTermDebtCurrent",
-        "LongTermDebtAndCapitalLeaseObligationsCurrent",
+        # Some companies tag both, with one of them left at zero.
+        ("LongTermDebtCurrent", "LongTermDebtAndCapitalLeaseObligationsCurrent"),
         "DebtCurrent",
     ],
     "short_term_borrowings": ["CommercialPaper", "ShortTermBorrowings", "NotesAndLoansPayable"],
@@ -127,13 +133,29 @@ def _annual_values(facts: dict, tag: str, full_year: bool) -> dict:
     return {end: value for end, (_, value) in latest.items()}
 
 
-def _first_available(facts: dict, tags: list, full_year: bool) -> dict:
-    """Merge several candidate tags, preferring earlier ones year by year."""
+def merge_tags(tags: list, values_for) -> dict:
+    """Combine candidate tags into one {period: value}, period by period.
+
+    Earlier entries in the list are preferred. An entry that is a bracketed
+    group of tags takes the largest of them (see the note on revenue above).
+    `values_for` is a function giving one tag's {period: value}.
+    """
     merged = {}
-    for tag in tags:
-        for end, value in _annual_values(facts, tag, full_year).items():
-            merged.setdefault(end, value)
+    for entry in tags:
+        group = entry if isinstance(entry, tuple) else (entry,)
+        largest = {}
+        for tag in group:
+            for period, value in values_for(tag).items():
+                if period not in largest or value > largest[period]:
+                    largest[period] = value
+        for period, value in largest.items():
+            merged.setdefault(period, value)
     return merged
+
+
+def _first_available(facts: dict, tags: list, full_year: bool) -> dict:
+    """One line's annual figures, from whichever of its candidate tags the company uses."""
+    return merge_tags(tags, lambda tag: _annual_values(facts, tag, full_year))
 
 
 def build_annual_statements(facts: dict, years: int = 10) -> pd.DataFrame:
@@ -187,8 +209,18 @@ def add_derived_lines(table: pd.DataFrame) -> pd.DataFrame:
     built the same way.
     """
     # Gross profit isn't always tagged; it is revenue minus the cost of making the product.
+    # A worked-out margin above 80% is not believed: it means the "cost" tag
+    # covers only part of the costs (a health insurer's medical bills, say, are
+    # tagged elsewhere), and a blank is better than a wrong number.
+    worked_out = table["revenue"] - table["cost_of_revenue"]
     table["gross_profit"] = table["gross_profit"].fillna(
-        table["revenue"] - table["cost_of_revenue"]
+        worked_out.where(worked_out <= 0.80 * table["revenue"])
+    )
+
+    # Shareholders' equity: when only the total including outside owners of
+    # subsidiaries is tagged, take their part off.
+    table["equity"] = table["equity"].fillna(
+        table["equity_with_minorities"] - table["minority_interest"].fillna(0)
     )
 
     # Some companies (Exxon, for one) never report operating income. Rebuild an
@@ -207,10 +239,21 @@ def add_derived_lines(table: pd.DataFrame) -> pd.DataFrame:
     # companies tag debt inconsistently, and lease obligations are mostly left out.
     pieces = table[["debt_noncurrent", "debt_current", "short_term_borrowings"]]
     summed = pieces.sum(axis=1, min_count=1)
-    table["total_debt"] = summed.where(table["debt_noncurrent"].notna(), table["debt_combined"])
+    # The combined tag is meant to include the part due within a year, but some
+    # companies (Tesla, for one) use it for the long-term part only and tag the
+    # rest separately. Where the debt note gives a total, use whichever reading
+    # lands closer to it.
+    combined = table["debt_combined"]
+    with_current = combined + table["debt_current"]
+    note = table["debt_per_note"]
+    closer_with_current = (with_current - note).abs() < (combined - note).abs()
+    single_figure = with_current.where(closer_with_current, combined)
+    table["total_debt"] = summed.where(table["debt_noncurrent"].notna(), single_figure)
     table["total_debt"] = table["total_debt"].fillna(summed)
 
-    table["cash_and_investments"] = table[["cash", "short_term_investments"]].sum(
+    investments = table[["short_term_investments", "marketable_securities"]].sum(axis=1, min_count=1)
+    investments = investments.fillna(table["securities_for_sale"])
+    table["cash_and_investments"] = pd.concat([table["cash"], investments], axis=1).sum(
         axis=1, min_count=1
     )
 

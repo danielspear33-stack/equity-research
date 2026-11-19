@@ -204,6 +204,7 @@ watchlist marks filings from the last week as new.
 | `research/report.py` | Ties the pieces together for one ticker |
 | `app.py`, `views/` | The screens |
 | `tests/` | Checks the calculations against numbers worked out by hand |
+| `tools/validate.py` | Compares the tool's figures with an independent source and writes `docs/VALIDATION.md` |
 
 Run the tests with `python -m pytest`.
 
@@ -233,6 +234,9 @@ These are judgement calls, set in `research/config.py`:
 
 ## Known limitations
 
+- **Companies that re-registered under a new holding company** need an entry in
+  `data/predecessors.json` to join their earlier filings on. Exxon is listed; any other
+  such company will show as having no annual reports until it is added.
 - **The LBO is simplified.** It treats the buyout debt as one loan at one rate, charges
   interest on the opening balance, uses every spare dollar to repay debt, and sells at
   the multiple paid unless you change it. Real buyouts layer several kinds of debt and
@@ -290,4 +294,6 @@ These are judgement calls, set in `research/config.py`:
 - **Peer suggestions are a hand-picked list** covering the built-in tickers. For any
   other company you choose the peers yourself.
 - **Prices come from an unofficial Yahoo Finance feed** that can stop working.
-- **Figures are not cross-checked** against a second data source.
+- **Figures are cross-checked only for a sample.** `docs/VALIDATION.md` compares 15
+  companies with Yahoo Finance: 94% of like-for-like figures agree within 1%, and the
+  known gaps are listed there. Companies outside the sample are unchecked.

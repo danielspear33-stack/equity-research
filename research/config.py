@@ -8,6 +8,9 @@ CACHE_DIR = PROJECT_ROOT / ".cache"
 COMPANY_LIST_FILE = PROJECT_ROOT / "data" / "companies.json"
 SEED_SIC_FILE = PROJECT_ROOT / "data" / "seed_sic.json"
 PEER_GROUPS_FILE = PROJECT_ROOT / "data" / "peer_groups.json"
+# Companies that re-registered with the SEC under a new holding company, and the
+# registration(s) their earlier filings are under.
+PREDECESSORS_FILE = PROJECT_ROOT / "data" / "predecessors.json"
 # Your own saved data: watchlist, DCF assumptions, peers, daily snapshots, memos.
 USER_DATA_DIR = PROJECT_ROOT / "userdata"
 
